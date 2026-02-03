@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -27,10 +27,19 @@ interface BoardProps {
 }
 
 export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn }: BoardProps) {
-  const { columns, tasks, optimisticMoveTask, moveTask } = useBoardStore();
+  const { columns, tasks, optimisticMoveTask, moveTask, isTransitionAllowed } = useBoardStore();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   // Store original task state for rollback on failed moves
   const originalTaskRef = useRef<Task | null>(null);
+
+  // Check if a column is a valid drop target for the currently dragged task
+  const isValidDropTarget = useCallback(
+    (targetColumnId: string): boolean => {
+      if (!activeTask) return true;
+      return isTransitionAllowed(activeTask.column_id, targetColumnId);
+    },
+    [activeTask, isTransitionAllowed]
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -77,6 +86,11 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn }
     // Check if we're over a column
     const overColumn = columns.find((c) => c.id === overId);
     if (overColumn && activeTaskItem.column_id !== overColumn.id) {
+      // Check workflow validation before allowing the move
+      if (!isTransitionAllowed(activeTaskItem.column_id, overColumn.id)) {
+        return; // Don't allow the optimistic move if workflow forbids it
+      }
+
       // Moving to a different column
       const tasksInTargetColumn = tasksByColumn[overColumn.id] || [];
       const lastTask = tasksInTargetColumn[tasksInTargetColumn.length - 1];
@@ -166,6 +180,8 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn }
               onCreateTask={onCreateTask}
               onEditTask={onEditTask}
               onEditColumn={onEditColumn}
+              isValidDropTarget={isValidDropTarget(column.id)}
+              isDragging={activeTask !== null}
             />
           ))}
 

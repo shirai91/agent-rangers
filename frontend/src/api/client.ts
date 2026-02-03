@@ -5,6 +5,18 @@ import type {
   CreateBoardInput,
   UpdateTaskInput,
   MoveTaskInput,
+  WorkflowDefinition,
+  WorkflowTransition,
+  CreateWorkflowInput,
+  UpdateWorkflowInput,
+  CreateTransitionInput,
+  UpdateTransitionInput,
+  AllowedTarget,
+  AllowedTransitionsMap,
+  TaskActivity,
+  TaskActivityListResponse,
+  BoardActivityResponse,
+  UpdateColumnInput,
 } from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -201,5 +213,85 @@ export const api = {
   deleteTask: (id: string) =>
     fetchJSON<void>(`/api/tasks/${encodeId(id)}`, {
       method: 'DELETE',
+    }),
+
+  // Workflows
+  getWorkflows: (boardId: string) =>
+    fetchJSON<WorkflowDefinition[]>(`/api/boards/${encodeId(boardId)}/workflows`),
+
+  getActiveWorkflow: (boardId: string) =>
+    fetchJSON<WorkflowDefinition>(`/api/boards/${encodeId(boardId)}/workflows/active`),
+
+  createWorkflow: (boardId: string, data: CreateWorkflowInput) =>
+    fetchJSON<WorkflowDefinition>(`/api/boards/${encodeId(boardId)}/workflows`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getWorkflow: (id: string) =>
+    fetchJSON<WorkflowDefinition>(`/api/workflows/${encodeId(id)}`),
+
+  updateWorkflow: (id: string, data: UpdateWorkflowInput) =>
+    fetchJSON<WorkflowDefinition>(`/api/workflows/${encodeId(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkflow: (id: string) =>
+    fetchJSON<void>(`/api/workflows/${encodeId(id)}`, {
+      method: 'DELETE',
+    }),
+
+  // Transitions
+  getTransitions: (workflowId: string) =>
+    fetchJSON<WorkflowTransition[]>(`/api/workflows/${encodeId(workflowId)}/transitions`),
+
+  createTransition: (workflowId: string, data: CreateTransitionInput) =>
+    fetchJSON<WorkflowTransition>(`/api/workflows/${encodeId(workflowId)}/transitions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateTransition: (id: string, data: UpdateTransitionInput) =>
+    fetchJSON<WorkflowTransition>(`/api/transitions/${encodeId(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteTransition: (id: string) =>
+    fetchJSON<void>(`/api/transitions/${encodeId(id)}`, {
+      method: 'DELETE',
+    }),
+
+  // Allowed Targets
+  getAllowedTargets: (boardId: string, columnId: string) =>
+    fetchJSON<AllowedTarget[]>(
+      `/api/boards/${encodeId(boardId)}/columns/${encodeId(columnId)}/allowed-targets`
+    ),
+
+  getAllowedTransitions: (boardId: string) =>
+    fetchJSON<AllowedTransitionsMap>(`/api/boards/${encodeId(boardId)}/allowed-transitions`),
+
+  // Activities
+  getTaskActivities: (taskId: string, page = 1, pageSize = 50) =>
+    fetchJSON<TaskActivityListResponse>(
+      `/api/tasks/${encodeId(taskId)}/activities?page=${page}&page_size=${pageSize}`
+    ),
+
+  getBoardActivities: (boardId: string, page = 1, pageSize = 50) =>
+    fetchJSON<BoardActivityResponse>(
+      `/api/boards/${encodeId(boardId)}/activities?page=${page}&page_size=${pageSize}`
+    ),
+
+  getRecentBoardActivities: (boardId: string, limit = 20) =>
+    fetchJSON<TaskActivity[]>(
+      `/api/boards/${encodeId(boardId)}/activities/recent?limit=${limit}`
+    ),
+
+  // Column Settings Update
+  updateColumnSettings: (id: string, data: UpdateColumnInput) =>
+    fetchJSON<Column>(`/api/columns/${encodeId(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
 };

@@ -23,13 +23,32 @@ interface ColumnProps {
   onCreateTask: (columnId: string) => void;
   onEditTask: (task: Task) => void;
   onEditColumn: (column: ColumnType) => void;
+  isValidDropTarget?: boolean;
+  isDragging?: boolean;
 }
 
-export function Column({ column, tasks, onCreateTask, onEditTask, onEditColumn }: ColumnProps) {
+export function Column({
+  column,
+  tasks,
+  onCreateTask,
+  onEditTask,
+  onEditColumn,
+  isValidDropTarget = true,
+  isDragging = false,
+}: ColumnProps) {
   const { deleteColumn } = useBoardStore();
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
+
+  // Determine visual state based on drag state and validity
+  const getDropZoneClass = () => {
+    if (!isDragging) return '';
+    if (isOver && isValidDropTarget) return 'ring-2 ring-primary bg-primary/5';
+    if (isOver && !isValidDropTarget) return 'ring-2 ring-destructive bg-destructive/5';
+    if (!isValidDropTarget) return 'opacity-50';
+    return 'ring-1 ring-dashed ring-muted-foreground/30';
+  };
 
   const handleDelete = async () => {
     if (window.confirm(`Are you sure you want to delete column "${column.name}"? All tasks in this column will be deleted.`)) {
@@ -45,7 +64,7 @@ export function Column({ column, tasks, onCreateTask, onEditTask, onEditColumn }
 
   return (
     <div className="flex-shrink-0 w-80">
-      <Card className={`h-full ${isOver ? 'ring-2 ring-primary' : ''}`}>
+      <Card className={`h-full transition-all duration-200 ${getDropZoneClass()}`}>
         <CardHeader className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

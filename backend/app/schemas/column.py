@@ -21,6 +21,18 @@ class ColumnBase(BaseModel):
         ge=0,
         description="Work-in-progress limit",
     )
+    triggers_agents: bool = Field(
+        False,
+        description="Whether moving a task to this column triggers AI agents",
+    )
+    is_start_column: bool = Field(
+        False,
+        description="Whether this is a starting column for new tasks",
+    )
+    is_end_column: bool = Field(
+        False,
+        description="Whether this is an ending/done column",
+    )
 
 
 class ColumnCreate(ColumnBase):
@@ -39,14 +51,23 @@ class ColumnUpdate(BaseModel):
     order: Optional[float] = None
     color: Optional[str] = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     wip_limit: Optional[int] = Field(None, ge=0)
+    triggers_agents: Optional[bool] = None
+    is_start_column: Optional[bool] = None
+    is_end_column: Optional[bool] = None
 
 
-class ColumnResponse(ColumnBase):
+class ColumnResponse(BaseModel):
     """Schema for column response with all fields."""
 
     id: UUID
     board_id: UUID
+    name: str
     order: float
+    color: Optional[str] = None
+    wip_limit: Optional[int] = None
+    triggers_agents: bool
+    is_start_column: bool
+    is_end_column: bool
     created_at: datetime
     updated_at: datetime
 

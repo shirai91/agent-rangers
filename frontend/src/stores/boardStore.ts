@@ -1,5 +1,18 @@
 import { create } from 'zustand';
-import type { Board, Column, Task, CreateBoardInput, CreateColumnInput, CreateTaskInput, UpdateTaskInput, MoveTaskInput } from '@/types';
+import type {
+  Board,
+  Column,
+  Task,
+  CreateBoardInput,
+  CreateColumnInput,
+  CreateTaskInput,
+  UpdateTaskInput,
+  MoveTaskInput,
+  WorkflowDefinition,
+  AllowedTransitionsMap,
+  TaskActivity,
+  UpdateColumnInput,
+} from '@/types';
 import { api, ApiError, NetworkError } from '@/api/client';
 
 /**
@@ -26,6 +39,15 @@ interface BoardState {
   loading: boolean;
   error: string | null;
 
+  // Workflow state
+  activeWorkflow: WorkflowDefinition | null;
+  allowedTransitions: AllowedTransitionsMap;
+  workflowLoading: boolean;
+
+  // Activity state
+  activities: TaskActivity[];
+  activitiesLoading: boolean;
+
   // Actions
   fetchBoards: () => Promise<void>;
   fetchBoard: (id: string) => Promise<void>;
@@ -34,12 +56,22 @@ interface BoardState {
 
   createColumn: (boardId: string, data: CreateColumnInput) => Promise<Column>;
   updateColumn: (id: string, data: { name: string }) => Promise<Column>;
+  updateColumnSettings: (id: string, data: UpdateColumnInput) => Promise<Column>;
   deleteColumn: (id: string) => Promise<void>;
 
   createTask: (boardId: string, data: CreateTaskInput) => Promise<Task>;
   updateTask: (id: string, data: UpdateTaskInput) => Promise<Task>;
   moveTask: (id: string, data: MoveTaskInput, originalTask?: Task) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+
+  // Workflow actions
+  fetchAllowedTransitions: (boardId: string) => Promise<void>;
+  fetchActiveWorkflow: (boardId: string) => Promise<void>;
+  isTransitionAllowed: (fromColumnId: string, toColumnId: string) => boolean;
+
+  // Activity actions
+  fetchBoardActivities: (boardId: string) => Promise<void>;
+  fetchTaskActivities: (taskId: string) => Promise<TaskActivity[]>;
 
   // Optimistic updates
   optimisticMoveTask: (taskId: string, newColumnId: string, newOrder: number) => Task | null;
@@ -54,6 +86,7 @@ interface BoardState {
   handleColumnCreated: (column: Column) => void;
   handleColumnUpdated: (column: Column) => void;
   handleColumnDeleted: (columnId: string) => void;
+  handleActivityCreated: (activity: TaskActivity) => void;
 
   // Reset
   reset: () => void;
@@ -67,6 +100,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   loading: false,
   error: null,
 
+  // Workflow state
+  activeWorkflow: null,
+  allowedTransitions: {},
+  workflowLoading: false,
+
+  // Activity state
+  activities: [],
+  activitiesLoading: false,
+
   fetchBoards: async () => {
     set({ loading: true, error: null });
     try {
@@ -78,16 +120,33 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   fetchBoard: async (id: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, workflowLoading: true });
     try {
-      const [board, columns, tasks] = await Promise.all([
+      const [board, columns, tasks, allowedTransitions] = await Promise.all([
         api.getBoard(id),
         api.getColumns(id),
         api.getTasks(id),
+        api.getAllowedTransitions(id),
       ]);
-      set({ currentBoard: board, columns, tasks, loading: false });
+      set({
+        currentBoard: board,
+        columns,
+        tasks,
+        allowedTransitions,
+        loading: false,
+        workflowLoading: false,
+      });
+
+      // Try to fetch active workflow (optional)
+      try {
+        const workflow = await api.getActiveWorkflow(id);
+        set({ activeWorkflow: workflow });
+      } catch {
+        // No active workflow is fine
+        set({ activeWorkflow: null });
+      }
     } catch (error) {
-      set({ error: getErrorMessage(error), loading: false });
+      set({ error: getErrorMessage(error), loading: false, workflowLoading: false });
     }
   },
 
@@ -140,6 +199,21 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const column = await api.updateColumn(id, data);
+      set((state) => ({
+        columns: state.columns.map((c) => (c.id === id ? column : c)),
+        loading: false,
+      }));
+      return column;
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false });
+      throw error;
+    }
+  },
+
+  updateColumnSettings: async (id: string, data: UpdateColumnInput) => {
+    set({ loading: true, error: null });
+    try {
+      const column = await api.updateColumnSettings(id, data);
       set((state) => ({
         columns: state.columns.map((c) => (c.id === id ? column : c)),
         loading: false,
@@ -227,6 +301,61 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
+  // Workflow actions
+  fetchAllowedTransitions: async (boardId: string) => {
+    set({ workflowLoading: true });
+    try {
+      const allowedTransitions = await api.getAllowedTransitions(boardId);
+      set({ allowedTransitions, workflowLoading: false });
+    } catch (error) {
+      set({ workflowLoading: false });
+    }
+  },
+
+  fetchActiveWorkflow: async (boardId: string) => {
+    set({ workflowLoading: true });
+    try {
+      const workflow = await api.getActiveWorkflow(boardId);
+      set({ activeWorkflow: workflow, workflowLoading: false });
+    } catch {
+      // No active workflow is fine
+      set({ activeWorkflow: null, workflowLoading: false });
+    }
+  },
+
+  isTransitionAllowed: (fromColumnId: string, toColumnId: string): boolean => {
+    // Same column always allowed
+    if (fromColumnId === toColumnId) return true;
+
+    const { allowedTransitions } = get();
+    // If no transitions defined, all are allowed
+    if (Object.keys(allowedTransitions).length === 0) return true;
+
+    const allowed = allowedTransitions[fromColumnId];
+    if (!allowed) return true; // No restrictions for this column
+    return allowed.includes(toColumnId);
+  },
+
+  // Activity actions
+  fetchBoardActivities: async (boardId: string) => {
+    set({ activitiesLoading: true });
+    try {
+      const response = await api.getRecentBoardActivities(boardId, 50);
+      set({ activities: response, activitiesLoading: false });
+    } catch (error) {
+      set({ activitiesLoading: false });
+    }
+  },
+
+  fetchTaskActivities: async (taskId: string) => {
+    try {
+      const response = await api.getTaskActivities(taskId);
+      return response.items;
+    } catch {
+      return [];
+    }
+  },
+
   optimisticMoveTask: (taskId: string, newColumnId: string, newOrder: number) => {
     // Find and return the original task before updating
     const originalTask = get().tasks.find((t) => t.id === taskId) || null;
@@ -301,6 +430,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }));
   },
 
+  handleActivityCreated: (activity: TaskActivity) => {
+    set((state) => ({
+      activities: [activity, ...state.activities].slice(0, 100), // Keep last 100
+    }));
+  },
+
   reset: () => {
     set({
       boards: [],
@@ -309,6 +444,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       tasks: [],
       loading: false,
       error: null,
+      activeWorkflow: null,
+      allowedTransitions: {},
+      workflowLoading: false,
+      activities: [],
+      activitiesLoading: false,
     });
   },
 }));

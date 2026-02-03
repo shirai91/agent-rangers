@@ -14,6 +14,8 @@ from app.models.task import Task
 from app.schemas.board import BoardCreate, BoardUpdate
 from app.schemas.column import ColumnCreate, ColumnUpdate
 from app.schemas.task import TaskCreate, TaskUpdate, TaskMove
+from app.services.workflow_service import WorkflowService
+from app.services.activity_service import ActivityService
 
 
 class BoardService:
@@ -333,6 +335,10 @@ class BoardService:
         db.add(task)
         await db.flush()
         await db.refresh(task)
+
+        # Log task creation activity
+        await ActivityService.log_task_created(db, task, actor="user")
+
         return task
 
     @staticmethod
@@ -382,7 +388,10 @@ class BoardService:
 
     @staticmethod
     async def move_task(
-        db: AsyncSession, task_id: UUID, move_data: TaskMove
+        db: AsyncSession,
+        task_id: UUID,
+        move_data: TaskMove,
+        validate_workflow: bool = True,
     ) -> Optional[Task]:
         """
         Move a task to a different column with optimistic locking.
@@ -391,12 +400,13 @@ class BoardService:
             db: Database session
             task_id: Task UUID
             move_data: Move operation data
+            validate_workflow: Whether to validate against workflow rules
 
         Returns:
             Updated task or None if not found
 
         Raises:
-            HTTPException: If version mismatch or invalid column
+            HTTPException: If version mismatch, invalid column, or workflow violation
         """
         task = await BoardService.get_task(db, task_id)
         if not task:
@@ -430,12 +440,38 @@ class BoardService:
                 detail=f"Column {move_data.column_id} not found in board",
             )
 
+        # Store original column for activity logging
+        from_column_id = task.column_id
+
+        # Validate workflow transition if moving to a different column
+        if validate_workflow and from_column_id and from_column_id != move_data.column_id:
+            is_valid = await WorkflowService.validate_transition(
+                db, task.board_id, from_column_id, move_data.column_id
+            )
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "WORKFLOW_VIOLATION",
+                        "message": "This transition is not allowed by the workflow",
+                        "from_column_id": str(from_column_id),
+                        "to_column_id": str(move_data.column_id),
+                    },
+                )
+
         # Update task position and column
         task.column_id = move_data.column_id
         task.order = move_data.order
         task.version += 1
 
         await db.flush()
+
+        # Log activity if column changed
+        if from_column_id and from_column_id != move_data.column_id:
+            await ActivityService.log_task_moved(
+                db, task, from_column_id, move_data.column_id, actor="user"
+            )
+
         await db.refresh(task)
         return task
 

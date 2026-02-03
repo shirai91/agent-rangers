@@ -13,6 +13,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.board import Board
     from app.models.column import Column
+    from app.models.task_activity import TaskActivity
 
 
 class Task(Base):
@@ -94,6 +95,13 @@ class Task(Base):
         "Column",
         back_populates="tasks",
         lazy="joined",
+    )
+    activities: Mapped[list["TaskActivity"]] = relationship(
+        "TaskActivity",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="TaskActivity.created_at.desc()",
     )
 
     def __repr__(self) -> str:

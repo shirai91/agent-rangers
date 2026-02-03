@@ -1,7 +1,7 @@
 """API routes for Agent Rangers."""
 
 from fastapi import APIRouter
-from app.api import boards, columns, tasks, websocket
+from app.api import boards, columns, tasks, websocket, workflows, activities
 
 api_router = APIRouter()
 
@@ -10,5 +10,7 @@ api_router.include_router(boards.router, prefix="/boards", tags=["boards"])
 api_router.include_router(columns.router, prefix="/columns", tags=["columns"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(websocket.router, prefix="/ws", tags=["websocket"])
+api_router.include_router(workflows.router, tags=["workflows"])
+api_router.include_router(activities.router, tags=["activities"])
 
 __all__ = ["api_router"]

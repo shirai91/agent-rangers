@@ -3,5 +3,15 @@
 from app.models.board import Board
 from app.models.column import Column
 from app.models.task import Task
+from app.models.workflow_definition import WorkflowDefinition
+from app.models.workflow_transition import WorkflowTransition
+from app.models.task_activity import TaskActivity
 
-__all__ = ["Board", "Column", "Task"]
+__all__ = [
+    "Board",
+    "Column",
+    "Task",
+    "WorkflowDefinition",
+    "WorkflowTransition",
+    "TaskActivity",
+]

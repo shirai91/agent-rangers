@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Float, Integer, ForeignKey, func
+from sqlalchemy import String, Float, Integer, Boolean, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,27 @@ class Column(Base):
         Integer,
         nullable=True,
         doc="Work-in-progress limit for this column",
+    )
+    triggers_agents: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        doc="Whether moving a task to this column triggers AI agents",
+    )
+    is_start_column: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        doc="Whether this is a starting column for new tasks",
+    )
+    is_end_column: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        doc="Whether this is an ending/done column",
     )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False,

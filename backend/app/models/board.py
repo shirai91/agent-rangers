@@ -13,6 +13,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.column import Column
     from app.models.task import Task
+    from app.models.workflow_definition import WorkflowDefinition
 
 
 class Board(Base):
@@ -59,6 +60,12 @@ class Board(Base):
     )
     tasks: Mapped[list["Task"]] = relationship(
         "Task",
+        back_populates="board",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
+    workflow_definitions: Mapped[list["WorkflowDefinition"]] = relationship(
+        "WorkflowDefinition",
         back_populates="board",
         cascade="all, delete-orphan",
         lazy="noload",

@@ -20,20 +20,63 @@ from app.schemas.task import (
     TaskMove,
     TaskResponse,
 )
+from app.schemas.workflow import (
+    WorkflowDefinitionBase,
+    WorkflowDefinitionCreate,
+    WorkflowDefinitionUpdate,
+    WorkflowDefinitionResponse,
+    WorkflowDefinitionWithTransitionsResponse,
+    WorkflowTransitionBase,
+    WorkflowTransitionCreate,
+    WorkflowTransitionUpdate,
+    WorkflowTransitionResponse,
+    WorkflowTransitionWithColumnsResponse,
+    AllowedTargetResponse,
+    AllowedTransitionsResponse,
+)
+from app.schemas.activity import (
+    TaskActivityBase,
+    TaskActivityCreate,
+    TaskActivityResponse,
+    TaskActivityListResponse,
+    BoardActivityResponse,
+)
 
 __all__ = [
+    # Board
     "BoardBase",
     "BoardCreate",
     "BoardUpdate",
     "BoardResponse",
     "BoardListResponse",
+    # Column
     "ColumnBase",
     "ColumnCreate",
     "ColumnUpdate",
     "ColumnResponse",
+    # Task
     "TaskBase",
     "TaskCreate",
     "TaskUpdate",
     "TaskMove",
     "TaskResponse",
+    # Workflow
+    "WorkflowDefinitionBase",
+    "WorkflowDefinitionCreate",
+    "WorkflowDefinitionUpdate",
+    "WorkflowDefinitionResponse",
+    "WorkflowDefinitionWithTransitionsResponse",
+    "WorkflowTransitionBase",
+    "WorkflowTransitionCreate",
+    "WorkflowTransitionUpdate",
+    "WorkflowTransitionResponse",
+    "WorkflowTransitionWithColumnsResponse",
+    "AllowedTargetResponse",
+    "AllowedTransitionsResponse",
+    # Activity
+    "TaskActivityBase",
+    "TaskActivityCreate",
+    "TaskActivityResponse",
+    "TaskActivityListResponse",
+    "BoardActivityResponse",
 ]
