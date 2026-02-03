@@ -93,9 +93,9 @@ async def _run_workflow_background(execution_id: UUID):
     Args:
         execution_id: Execution UUID
     """
-    from app.database import SessionLocal
+    from app.database import AsyncSessionLocal
 
-    async with SessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         try:
             execution = await AgentOrchestrator._get_execution(db, execution_id)
             if not execution:
@@ -322,7 +322,7 @@ async def stream_execution_output(
                 break
 
             # Fetch current execution state
-            async with SessionLocal() as stream_db:
+            async with AsyncSessionLocal() as stream_db:
                 result = await stream_db.execute(
                     select(AgentExecution).where(AgentExecution.id == execution_id)
                 )
@@ -390,4 +390,4 @@ async def stream_execution_output(
 
 
 # Import SessionLocal for background tasks and streaming
-from app.database import SessionLocal
+from app.database import AsyncSessionLocal
