@@ -24,7 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity } from 'lucide-react';
+import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity, X } from 'lucide-react';
 import type { Task, Column } from '@/types';
 
 function BoardsListView() {
@@ -219,24 +219,6 @@ function BoardView() {
     setCreateTaskOpen(true);
   };
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Card className="w-96">
-          <CardHeader>
-            <CardTitle>Error</CardTitle>
-            <CardDescription className="text-destructive">{error}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={handleBackToBoards}>
-              Back to Boards
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   if (loading || !currentBoard) {
     return (
       <>
@@ -392,28 +374,34 @@ function BoardView() {
 }
 
 function App() {
-  const { error } = useBoardStore();
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Card className="w-96">
-          <CardHeader>
-            <CardTitle>Error</CardTitle>
-            <CardDescription className="text-destructive">{error}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => window.location.reload()}>
-              Reload Page
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const { error, clearError } = useBoardStore();
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Dismissable error banner */}
+      {error && (
+        <div className="fixed top-4 right-4 z-50 max-w-md">
+          <Card className="border-destructive bg-destructive/10">
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between">
+                <CardTitle className="text-sm font-medium text-destructive">Error</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 hover:bg-destructive/20"
+                  onClick={clearError}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <p className="text-sm text-destructive">{error}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <Routes>
         <Route path="/" element={<BoardsListView />} />
         <Route path="/boards/:boardId" element={<BoardView />} />
