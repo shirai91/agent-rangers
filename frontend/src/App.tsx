@@ -6,16 +6,25 @@ import { Board } from '@/components/Board';
 import { CreateBoardDialog } from '@/components/CreateBoardDialog';
 import { CreateColumnDialog } from '@/components/CreateColumnDialog';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
+import { WorkflowEditor } from '@/components/WorkflowEditor';
+import { ActivityFeed } from '@/components/ActivityFeed';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard } from 'lucide-react';
+import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity } from 'lucide-react';
 import type { Task, Column } from '@/types';
 
 function BoardsListView() {
@@ -163,6 +172,8 @@ function BoardView() {
   const [selectedColumnId, setSelectedColumnId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editingColumn, setEditingColumn] = useState<Column | null>(null);
+  const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
+  const [activityFeedOpen, setActivityFeedOpen] = useState(false);
 
   const {
     currentBoard,
@@ -297,13 +308,25 @@ function BoardView() {
 
       <main className="container mx-auto">
         <div className="flex flex-col h-[calc(100vh-80px)]">
-          <div className="border-b px-6 py-4">
-            <h2 className="text-2xl font-bold">{currentBoard.name}</h2>
-            {currentBoard.description && (
-              <p className="text-muted-foreground mt-1">
-                {currentBoard.description}
-              </p>
-            )}
+          <div className="border-b px-6 py-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">{currentBoard.name}</h2>
+              {currentBoard.description && (
+                <p className="text-muted-foreground mt-1">
+                  {currentBoard.description}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setActivityFeedOpen(true)}>
+                <Activity className="mr-2 h-4 w-4" />
+                Activity
+              </Button>
+              <Button variant="outline" onClick={() => setWorkflowEditorOpen(true)}>
+                <Settings className="mr-2 h-4 w-4" />
+                Workflow
+              </Button>
+            </div>
           </div>
 
           <Board
@@ -338,6 +361,32 @@ function BoardView() {
         columnId={selectedColumnId}
         editTask={editingTask}
       />
+
+      {/* Workflow Editor Dialog */}
+      <Dialog open={workflowEditorOpen} onOpenChange={setWorkflowEditorOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Workflow Settings</DialogTitle>
+            <DialogDescription>
+              Define allowed transitions between columns
+            </DialogDescription>
+          </DialogHeader>
+          <WorkflowEditor boardId={currentBoard.id} />
+        </DialogContent>
+      </Dialog>
+
+      {/* Activity Feed Dialog */}
+      <Dialog open={activityFeedOpen} onOpenChange={setActivityFeedOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Activity Feed</DialogTitle>
+            <DialogDescription>
+              Recent activity on this board
+            </DialogDescription>
+          </DialogHeader>
+          <ActivityFeed boardId={currentBoard.id} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
