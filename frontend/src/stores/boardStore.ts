@@ -12,6 +12,8 @@ import type {
   AllowedTransitionsMap,
   TaskActivity,
   UpdateColumnInput,
+  AgentExecution,
+  WorkflowType,
 } from '@/types';
 import { api, ApiError, NetworkError } from '@/api/client';
 
@@ -48,6 +50,11 @@ interface BoardState {
   activities: TaskActivity[];
   activitiesLoading: boolean;
 
+  // Agent execution state
+  executions: AgentExecution[];
+  currentExecution: AgentExecution | null;
+  executionLoading: boolean;
+
   // Actions
   fetchBoards: () => Promise<void>;
   fetchBoard: (id: string) => Promise<void>;
@@ -73,6 +80,13 @@ interface BoardState {
   fetchBoardActivities: (boardId: string) => Promise<void>;
   fetchTaskActivities: (taskId: string) => Promise<TaskActivity[]>;
 
+  // Agent execution actions
+  startAgentWorkflow: (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>) => Promise<AgentExecution>;
+  fetchTaskExecutions: (taskId: string) => Promise<AgentExecution[]>;
+  fetchBoardExecutions: (boardId: string, statusFilter?: string) => Promise<void>;
+  cancelExecution: (executionId: string) => Promise<void>;
+  setCurrentExecution: (execution: AgentExecution | null) => void;
+
   // Optimistic updates
   optimisticMoveTask: (taskId: string, newColumnId: string, newOrder: number) => Task | null;
   revertOptimisticMove: (originalTask: Task) => void;
@@ -87,6 +101,10 @@ interface BoardState {
   handleColumnUpdated: (column: Column) => void;
   handleColumnDeleted: (columnId: string) => void;
   handleActivityCreated: (activity: TaskActivity) => void;
+  handleAgentStarted: (data: { task_id: string; execution_id: string }) => void;
+  handleAgentPhaseCompleted: (data: { execution_id: string; phase: string }) => void;
+  handleAgentCompleted: (data: { task_id: string; execution_id: string }) => void;
+  handleAgentFailed: (data: { task_id: string; error: string }) => void;
 
   // Reset
   reset: () => void;
@@ -108,6 +126,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   // Activity state
   activities: [],
   activitiesLoading: false,
+
+  // Agent execution state
+  executions: [],
+  currentExecution: null,
+  executionLoading: false,
 
   fetchBoards: async () => {
     set({ loading: true, error: null });
@@ -356,6 +379,72 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
+  // Agent execution actions
+  startAgentWorkflow: async (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>) => {
+    set({ executionLoading: true, error: null });
+    try {
+      const execution = await api.startAgentWorkflow(taskId, {
+        workflow_type: workflowType,
+        context,
+      });
+      set((state) => ({
+        executions: [execution, ...state.executions],
+        currentExecution: execution,
+        executionLoading: false,
+      }));
+      return execution;
+    } catch (error) {
+      set({ error: getErrorMessage(error), executionLoading: false });
+      throw error;
+    }
+  },
+
+  fetchTaskExecutions: async (taskId: string) => {
+    set({ executionLoading: true });
+    try {
+      const executions = await api.getTaskExecutions(taskId);
+      set({ executions, executionLoading: false });
+      return executions;
+    } catch (error) {
+      set({ executionLoading: false });
+      return [];
+    }
+  },
+
+  fetchBoardExecutions: async (boardId: string, statusFilter?: string) => {
+    set({ executionLoading: true });
+    try {
+      const executions = await api.getBoardExecutions(boardId, statusFilter);
+      set({ executions, executionLoading: false });
+    } catch (error) {
+      set({ executionLoading: false });
+    }
+  },
+
+  cancelExecution: async (executionId: string) => {
+    set({ executionLoading: true, error: null });
+    try {
+      await api.cancelExecution(executionId);
+      set((state) => ({
+        executions: state.executions.map((e) =>
+          e.id === executionId ? { ...e, status: 'cancelled' } : e
+        ),
+        currentExecution:
+          state.currentExecution?.id === executionId
+            ? { ...state.currentExecution, status: 'cancelled' }
+            : state.currentExecution,
+        executionLoading: false,
+      }));
+    } catch (error) {
+      set({ error: getErrorMessage(error), executionLoading: false });
+      throw error;
+    }
+  },
+
+  setCurrentExecution: (execution: AgentExecution | null) => {
+    set({ currentExecution: execution });
+  },
+
   optimisticMoveTask: (taskId: string, newColumnId: string, newOrder: number) => {
     // Find and return the original task before updating
     const originalTask = get().tasks.find((t) => t.id === taskId) || null;
@@ -436,6 +525,87 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }));
   },
 
+  handleAgentStarted: (data: { task_id: string; execution_id: string }) => {
+    // Fetch the full execution details
+    api.getExecution(data.execution_id)
+      .then((execution) => {
+        set((state) => {
+          const exists = state.executions.some((e) => e.id === execution.id);
+          if (exists) {
+            return {
+              executions: state.executions.map((e) =>
+                e.id === execution.id ? execution : e
+              ),
+            };
+          }
+          return {
+            executions: [execution, ...state.executions],
+          };
+        });
+      })
+      .catch(() => {
+        // Silently handle error - execution will be fetched later
+      });
+  },
+
+  handleAgentPhaseCompleted: (data: { execution_id: string; phase: string }) => {
+    // Fetch updated execution details
+    api.getExecution(data.execution_id)
+      .then((execution) => {
+        set((state) => ({
+          executions: state.executions.map((e) =>
+            e.id === execution.id ? execution : e
+          ),
+          currentExecution:
+            state.currentExecution?.id === execution.id
+              ? execution
+              : state.currentExecution,
+        }));
+      })
+      .catch(() => {
+        // Silently handle error
+      });
+  },
+
+  handleAgentCompleted: (data: { task_id: string; execution_id: string }) => {
+    // Fetch updated execution details
+    api.getExecution(data.execution_id)
+      .then((execution) => {
+        set((state) => ({
+          executions: state.executions.map((e) =>
+            e.id === execution.id ? execution : e
+          ),
+          currentExecution:
+            state.currentExecution?.id === execution.id
+              ? execution
+              : state.currentExecution,
+        }));
+      })
+      .catch(() => {
+        // Silently handle error
+      });
+
+    // Also refresh the task to get updated agent status
+    api.getTask(data.task_id)
+      .then((task) => {
+        get().handleTaskUpdated(task);
+      })
+      .catch(() => {
+        // Silently handle error
+      });
+  },
+
+  handleAgentFailed: (data: { task_id: string; error: string }) => {
+    // Refresh task to get updated agent status
+    api.getTask(data.task_id)
+      .then((task) => {
+        get().handleTaskUpdated(task);
+      })
+      .catch(() => {
+        // Silently handle error
+      });
+  },
+
   reset: () => {
     set({
       boards: [],
@@ -449,6 +619,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       workflowLoading: false,
       activities: [],
       activitiesLoading: false,
+      executions: [],
+      currentExecution: null,
+      executionLoading: false,
     });
   },
 }));

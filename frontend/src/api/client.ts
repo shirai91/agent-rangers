@@ -17,6 +17,9 @@ import type {
   TaskActivityListResponse,
   BoardActivityResponse,
   UpdateColumnInput,
+  AgentExecution,
+  StartAgentWorkflowInput,
+  ExecutionStatusResponse,
 } from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -313,4 +316,37 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  // Agent Workflow
+  startAgentWorkflow: (taskId: string, data: StartAgentWorkflowInput) =>
+    fetchJSON<AgentExecution>(`/api/tasks/${encodeId(taskId)}/agent/start`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getExecution: (executionId: string) =>
+    fetchJSON<AgentExecution>(`/api/executions/${encodeId(executionId)}`),
+
+  getExecutionStatus: (executionId: string) =>
+    fetchJSON<ExecutionStatusResponse>(`/api/executions/${encodeId(executionId)}/status`),
+
+  cancelExecution: (executionId: string) =>
+    fetchJSON<void>(`/api/executions/${encodeId(executionId)}`, {
+      method: 'DELETE',
+    }),
+
+  getTaskExecutions: (taskId: string, limit?: number) =>
+    fetchJSON<AgentExecution[]>(
+      `/api/tasks/${encodeId(taskId)}/executions${limit ? `?limit=${limit}` : ''}`
+    ),
+
+  getBoardExecutions: (boardId: string, statusFilter?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (statusFilter) params.append('status', statusFilter);
+    if (limit) params.append('limit', limit.toString());
+    const queryString = params.toString();
+    return fetchJSON<AgentExecution[]>(
+      `/api/boards/${encodeId(boardId)}/executions${queryString ? `?${queryString}` : ''}`
+    );
+  },
 };

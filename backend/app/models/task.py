@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from app.models.board import Board
     from app.models.column import Column
     from app.models.task_activity import TaskActivity
+    from app.models.agent_execution import AgentExecution
+    from app.models.agent_output import AgentOutput
 
 
 class Task(Base):
@@ -73,6 +75,25 @@ class Task(Base):
         server_default="1",
         doc="Version number for optimistic locking",
     )
+    # Agent-related fields
+    agent_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Agent processing status: pending, architecture, development, review, completed, failed",
+    )
+    current_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_executions.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+        doc="Reference to the current/latest agent execution",
+    )
+    agent_metadata: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+        doc="Additional agent-related metadata",
+    )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False,
         default=datetime.utcnow,
@@ -102,6 +123,28 @@ class Task(Base):
         cascade="all, delete-orphan",
         lazy="noload",
         order_by="TaskActivity.created_at.desc()",
+    )
+    # Agent relationships
+    current_execution: Mapped["AgentExecution | None"] = relationship(
+        "AgentExecution",
+        foreign_keys=[current_execution_id],
+        lazy="joined",
+        post_update=True,
+    )
+    executions: Mapped[list["AgentExecution"]] = relationship(
+        "AgentExecution",
+        back_populates="task",
+        foreign_keys="AgentExecution.task_id",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="AgentExecution.created_at.desc()",
+    )
+    agent_outputs: Mapped[list["AgentOutput"]] = relationship(
+        "AgentOutput",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="AgentOutput.created_at.desc()",
     )
 
     def __repr__(self) -> str:

@@ -74,6 +74,11 @@ class Column(Base):
         server_default="false",
         doc="Whether this is an ending/done column",
     )
+    agent_workflow_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Which workflow to run when task enters: development, quick_development, architecture_only",
+    )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False,
         default=datetime.utcnow,

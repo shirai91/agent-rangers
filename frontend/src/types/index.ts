@@ -32,6 +32,9 @@ export interface Task {
   version: number;
   created_at: string;
   updated_at: string;
+  agent_status?: string | null;
+  current_execution_id?: string | null;
+  agent_metadata?: Record<string, unknown> | null;
 }
 
 export interface CreateBoardInput {
@@ -77,7 +80,11 @@ export type WSEvent =
   | { type: 'task_deleted'; data: { task_id: string } }
   | { type: 'column_created'; data: Column }
   | { type: 'column_updated'; data: Column }
-  | { type: 'column_deleted'; data: { column_id: string } };
+  | { type: 'column_deleted'; data: { column_id: string } }
+  | { type: 'agent_started'; data: AgentExecution }
+  | { type: 'agent_phase_completed'; data: AgentOutput }
+  | { type: 'agent_completed'; data: AgentExecution }
+  | { type: 'agent_failed'; data: AgentExecution };
 
 // Workflow Types
 export interface WorkflowDefinition {
@@ -191,3 +198,78 @@ export interface UpdateColumnInput {
 
 // Allowed transitions map
 export type AllowedTransitionsMap = Record<string, string[]>;
+
+// Agent Types
+export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentPhase = 'architecture' | 'development' | 'review';
+
+export type WorkflowType = 'development' | 'quick_development' | 'architecture_only';
+
+export interface AgentOutput {
+  id: string;
+  execution_id: string;
+  task_id: string;
+  agent_name: string;
+  phase: string;
+  iteration: number;
+  status: string;
+  input_context: Record<string, unknown>;
+  output_content: string | null;
+  output_structured: Record<string, unknown> | null;
+  files_created: unknown[];
+  tokens_used: number | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface AgentExecution {
+  id: string;
+  task_id: string;
+  board_id: string;
+  workflow_type: string;
+  status: string;
+  current_phase: string | null;
+  iteration: number;
+  max_iterations: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  context: Record<string, unknown>;
+  result_summary: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  outputs?: AgentOutput[];
+}
+
+export interface StartAgentWorkflowInput {
+  workflow_type: WorkflowType;
+  context?: Record<string, unknown>;
+}
+
+export interface OutputSummary {
+  id: string;
+  agent_name: string;
+  phase: string;
+  iteration: number;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface ExecutionStatusResponse {
+  execution_id: string;
+  task_id: string;
+  workflow_type: string;
+  status: string;
+  current_phase: string | null;
+  iteration: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  outputs: OutputSummary[];
+}

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.column import Column
     from app.models.task import Task
     from app.models.workflow_definition import WorkflowDefinition
+    from app.models.agent_execution import AgentExecution
 
 
 class Board(Base):
@@ -66,6 +67,12 @@ class Board(Base):
     )
     workflow_definitions: Mapped[list["WorkflowDefinition"]] = relationship(
         "WorkflowDefinition",
+        back_populates="board",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
+    agent_executions: Mapped[list["AgentExecution"]] = relationship(
+        "AgentExecution",
         back_populates="board",
         cascade="all, delete-orphan",
         lazy="noload",

@@ -16,6 +16,7 @@ from app.schemas.column import ColumnCreate, ColumnUpdate
 from app.schemas.task import TaskCreate, TaskUpdate, TaskMove
 from app.services.workflow_service import WorkflowService
 from app.services.activity_service import ActivityService
+from app.services.agent_orchestrator import AgentOrchestrator
 
 
 class BoardService:
@@ -472,8 +473,86 @@ class BoardService:
                 db, task, from_column_id, move_data.column_id, actor="user"
             )
 
+            # Trigger agent workflow if target column has agent_workflow_type configured
+            if column.agent_workflow_type:
+                await BoardService.trigger_agent_for_column(
+                    db, task, column
+                )
+
         await db.refresh(task)
         return task
+
+    @staticmethod
+    async def trigger_agent_for_column(
+        db: AsyncSession,
+        task: Task,
+        column: Column,
+    ) -> None:
+        """
+        Trigger an agent workflow when a task enters a column with agent automation.
+
+        This method is called automatically when a task is moved to a column that
+        has agent_workflow_type configured. It creates and starts an agent execution
+        asynchronously.
+
+        Args:
+            db: Database session
+            task: Task that was moved
+            column: Target column with agent_workflow_type configured
+        """
+        if not column.agent_workflow_type:
+            return
+
+        # Check if task already has a running agent execution
+        if task.agent_status in ("pending", "running", "architecture", "development", "review"):
+            # Log that we're skipping because an execution is already running
+            await ActivityService.log_activity(
+                db=db,
+                task_id=task.id,
+                board_id=task.board_id,
+                activity_type="agent_trigger_skipped",
+                actor="system",
+                metadata={
+                    "column_id": str(column.id),
+                    "column_name": column.name,
+                    "workflow_type": column.agent_workflow_type,
+                    "reason": "execution_already_running",
+                    "current_status": task.agent_status,
+                },
+            )
+            return
+
+        # Create the agent execution
+        execution = await AgentOrchestrator.create_execution(
+            db=db,
+            task_id=task.id,
+            board_id=task.board_id,
+            workflow_type=column.agent_workflow_type,
+            context={
+                "triggered_by": "column_transition",
+                "column_id": str(column.id),
+                "column_name": column.name,
+            },
+        )
+
+        # Start the execution
+        await AgentOrchestrator.start_execution(db, execution.id)
+
+        # Log the trigger
+        await ActivityService.log_activity(
+            db=db,
+            task_id=task.id,
+            board_id=task.board_id,
+            activity_type="agent_triggered",
+            actor="system",
+            metadata={
+                "execution_id": str(execution.id),
+                "column_id": str(column.id),
+                "column_name": column.name,
+                "workflow_type": column.agent_workflow_type,
+                "triggered_by": "column_transition",
+            },
+        )
 
     @staticmethod
     async def delete_task(db: AsyncSession, task_id: UUID) -> bool:

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,9 +10,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { MoreVertical, Trash2, Edit, GripVertical } from 'lucide-react';
-import type { Task } from '@/types';
+import type { Task, AgentStatus, WorkflowType } from '@/types';
 import { useBoardStore } from '@/stores/boardStore';
+import { AgentStatusBadge } from './AgentStatusBadge';
+import { AgentControlPanel } from './AgentControlPanel';
+import { AgentExecutionPanel } from './AgentExecutionPanel';
 
 interface TaskCardProps {
   task: Task;
@@ -19,7 +29,8 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onEdit }: TaskCardProps) {
-  const { deleteTask } = useBoardStore();
+  const { deleteTask, startAgentWorkflow, cancelExecution } = useBoardStore();
+  const [showExecutionPanel, setShowExecutionPanel] = useState(false);
   const {
     attributes,
     listeners,
@@ -58,6 +69,28 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
     }
   };
 
+  const handleStartWorkflow = async (workflowType: WorkflowType) => {
+    try {
+      await startAgentWorkflow(task.id, workflowType);
+    } catch (error) {
+      console.error('Failed to start agent workflow:', error);
+    }
+  };
+
+  const handleCancelExecution = async () => {
+    if (task.current_execution_id) {
+      try {
+        await cancelExecution(task.current_execution_id);
+      } catch (error) {
+        console.error('Failed to cancel execution:', error);
+      }
+    }
+  };
+
+  const handleViewExecutions = () => {
+    setShowExecutionPanel(true);
+  };
+
   return (
     <div ref={setNodeRef} style={style}>
       <Card className="mb-2 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow">
@@ -71,27 +104,42 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
               >
                 <GripVertical className="h-4 w-4" />
               </button>
-              <CardTitle className="text-sm font-medium break-words">
-                {task.title}
-              </CardTitle>
+              <div className="flex-1 min-w-0">
+                <CardTitle className="text-sm font-medium break-words">
+                  {task.title}
+                </CardTitle>
+                {task.agent_status && (
+                  <div className="mt-1">
+                    <AgentStatusBadge status={task.agent_status as AgentStatus} />
+                  </div>
+                )}
+              </div>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onEdit(task)}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDelete}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-1">
+              <AgentControlPanel
+                agentStatus={task.agent_status as AgentStatus | null}
+                onViewExecutions={handleViewExecutions}
+                onStartWorkflow={handleStartWorkflow}
+                onCancelExecution={task.current_execution_id ? handleCancelExecution : undefined}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onEdit(task)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleDelete}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-2">
@@ -114,6 +162,15 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={showExecutionPanel} onOpenChange={setShowExecutionPanel}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Agent Executions - {task.title}</DialogTitle>
+          </DialogHeader>
+          <AgentExecutionPanel taskId={task.id} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

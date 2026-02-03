@@ -6,6 +6,8 @@ from app.models.task import Task
 from app.models.workflow_definition import WorkflowDefinition
 from app.models.workflow_transition import WorkflowTransition
 from app.models.task_activity import TaskActivity
+from app.models.agent_execution import AgentExecution
+from app.models.agent_output import AgentOutput
 
 __all__ = [
     "Board",
@@ -14,4 +16,6 @@ __all__ = [
     "WorkflowDefinition",
     "WorkflowTransition",
     "TaskActivity",
+    "AgentExecution",
+    "AgentOutput",
 ]
