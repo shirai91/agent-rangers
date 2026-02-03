@@ -24,9 +24,10 @@ interface BoardProps {
   onCreateTask: (columnId: string) => void;
   onEditTask: (task: Task) => void;
   onEditColumn: (column: ColumnType) => void;
+  onColumnSettings: (column: ColumnType) => void;
 }
 
-export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn }: BoardProps) {
+export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, onColumnSettings }: BoardProps) {
   const { columns, tasks, optimisticMoveTask, moveTask, isTransitionAllowed } = useBoardStore();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   // Store original task state for rollback on failed moves
@@ -180,6 +181,7 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn }
               onCreateTask={onCreateTask}
               onEditTask={onEditTask}
               onEditColumn={onEditColumn}
+              onColumnSettings={onColumnSettings}
               isValidDropTarget={isValidDropTarget(column.id)}
               isDragging={activeTask !== null}
             />

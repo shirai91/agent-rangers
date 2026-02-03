@@ -8,6 +8,7 @@ import { CreateColumnDialog } from '@/components/CreateColumnDialog';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { WorkflowEditor } from '@/components/WorkflowEditor';
 import { ActivityFeed } from '@/components/ActivityFeed';
+import { ColumnSettingsDialog } from '@/components/ColumnSettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -174,6 +175,8 @@ function BoardView() {
   const [editingColumn, setEditingColumn] = useState<Column | null>(null);
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
   const [activityFeedOpen, setActivityFeedOpen] = useState(false);
+  const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
+  const [settingsColumn, setSettingsColumn] = useState<Column | null>(null);
 
   const {
     currentBoard,
@@ -205,6 +208,11 @@ function BoardView() {
   const handleEditColumn = (column: Column) => {
     setEditingColumn(column);
     setCreateColumnOpen(true);
+  };
+
+  const handleColumnSettings = (column: Column) => {
+    setSettingsColumn(column);
+    setColumnSettingsOpen(true);
   };
 
   const handleCreateTask = (columnId: string) => {
@@ -316,6 +324,7 @@ function BoardView() {
             onCreateTask={handleCreateTask}
             onEditTask={handleEditTask}
             onEditColumn={handleEditColumn}
+            onColumnSettings={handleColumnSettings}
           />
         </div>
       </main>
@@ -342,6 +351,16 @@ function BoardView() {
         boardId={currentBoard.id}
         columnId={selectedColumnId}
         editTask={editingTask}
+      />
+
+      {/* Column Settings Dialog */}
+      <ColumnSettingsDialog
+        column={settingsColumn}
+        open={columnSettingsOpen}
+        onOpenChange={(open) => {
+          setColumnSettingsOpen(open);
+          if (!open) setSettingsColumn(null);
+        }}
       />
 
       {/* Workflow Editor Dialog */}

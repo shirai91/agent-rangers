@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Trash2, Edit } from 'lucide-react';
+import { Plus, MoreVertical, Trash2, Edit, Settings } from 'lucide-react';
 import { TaskCard } from './TaskCard';
 import type { Column as ColumnType, Task } from '@/types';
 import { useBoardStore } from '@/stores/boardStore';
@@ -23,6 +23,7 @@ interface ColumnProps {
   onCreateTask: (columnId: string) => void;
   onEditTask: (task: Task) => void;
   onEditColumn: (column: ColumnType) => void;
+  onColumnSettings: (column: ColumnType) => void;
   isValidDropTarget?: boolean;
   isDragging?: boolean;
 }
@@ -33,6 +34,7 @@ export function Column({
   onCreateTask,
   onEditTask,
   onEditColumn,
+  onColumnSettings,
   isValidDropTarget = true,
   isDragging = false,
 }: ColumnProps) {
@@ -93,7 +95,11 @@ export function Column({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => onEditColumn(column)}>
                     <Edit className="mr-2 h-4 w-4" />
-                    Edit
+                    Edit Name
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onColumnSettings(column)}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    Settings
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleDelete}>
                     <Trash2 className="mr-2 h-4 w-4" />
