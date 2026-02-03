@@ -20,9 +20,23 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { api } from '@/api/client';
+import { api, ApiError, NetworkError } from '@/api/client';
 import { useBoardStore } from '@/stores/boardStore';
 import type { WorkflowDefinition, WorkflowTransition } from '@/types';
+
+/** Extract error message consistently */
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError || err instanceof NetworkError) {
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  return fallback;
+}
 
 interface WorkflowEditorProps {
   boardId: string;
@@ -51,7 +65,7 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
       const active = workflows.find((w) => w.is_active) || workflows[0] || null;
       setWorkflow(active);
     } catch (err) {
-      setError('Failed to load workflow');
+      setError(getErrorMessage(err, 'Failed to load workflow'));
     } finally {
       setLoading(false);
     }
@@ -72,7 +86,7 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
       setNewWorkflowName('Default Workflow');
       await fetchAllowedTransitions(boardId);
     } catch (err) {
-      setError('Failed to create workflow');
+      setError(getErrorMessage(err, 'Failed to create workflow'));
     }
   };
 
@@ -90,7 +104,7 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
       setSelectedFromColumn('');
       setSelectedToColumn('');
     } catch (err) {
-      setError('Failed to add transition');
+      setError(getErrorMessage(err, 'Failed to add transition'));
     }
   };
 
@@ -100,7 +114,7 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
       await loadWorkflow();
       await fetchAllowedTransitions(boardId);
     } catch (err) {
-      setError('Failed to delete transition');
+      setError(getErrorMessage(err, 'Failed to delete transition'));
     }
   };
 
@@ -112,7 +126,7 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
       await loadWorkflow();
       await fetchAllowedTransitions(boardId);
     } catch (err) {
-      setError('Failed to update workflow');
+      setError(getErrorMessage(err, 'Failed to update workflow'));
     }
   };
 

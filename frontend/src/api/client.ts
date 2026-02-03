@@ -89,8 +89,27 @@ async function fetchJSON<T>(
       try {
         const errorData = await response.json();
         if (errorData.detail) {
-          // Sanitize error message to prevent XSS
-          errorMessage = String(errorData.detail).slice(0, 500);
+          // Handle different detail formats consistently
+          if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail;
+          } else if (Array.isArray(errorData.detail)) {
+            // Pydantic validation errors - extract messages
+            errorMessage = errorData.detail
+              .map((err: { msg?: string; message?: string; loc?: string[] }) => 
+                err.msg || err.message || JSON.stringify(err)
+              )
+              .join(', ');
+          } else if (typeof errorData.detail === 'object') {
+            // Object with message property
+            errorMessage = errorData.detail.message || 
+                          errorData.detail.msg || 
+                          JSON.stringify(errorData.detail);
+          }
+          // Sanitize and truncate
+          errorMessage = String(errorMessage).slice(0, 500);
+        } else if (errorData.message) {
+          // Alternative: top-level message property
+          errorMessage = String(errorData.message).slice(0, 500);
         }
         errorCode = errorData.code;
       } catch {
