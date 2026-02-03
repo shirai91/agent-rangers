@@ -1,0 +1,111 @@
+import { useDroppable } from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Plus, MoreVertical, Trash2, Edit } from 'lucide-react';
+import { TaskCard } from './TaskCard';
+import type { Column as ColumnType, Task } from '@/types';
+import { useBoardStore } from '@/stores/boardStore';
+import { Badge } from '@/components/ui/badge';
+
+interface ColumnProps {
+  column: ColumnType;
+  tasks: Task[];
+  onCreateTask: (columnId: string) => void;
+  onEditTask: (task: Task) => void;
+  onEditColumn: (column: ColumnType) => void;
+}
+
+export function Column({ column, tasks, onCreateTask, onEditTask, onEditColumn }: ColumnProps) {
+  const { deleteColumn } = useBoardStore();
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.id,
+  });
+
+  const handleDelete = async () => {
+    if (window.confirm(`Are you sure you want to delete column "${column.name}"? All tasks in this column will be deleted.`)) {
+      try {
+        await deleteColumn(column.id);
+      } catch (error) {
+        console.error('Failed to delete column:', error);
+      }
+    }
+  };
+
+  const taskIds = tasks.map((task) => task.id);
+
+  return (
+    <div className="flex-shrink-0 w-80">
+      <Card className={`h-full ${isOver ? 'ring-2 ring-primary' : ''}`}>
+        <CardHeader className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base font-semibold">
+                {column.name}
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs">
+                {tasks.length}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onCreateTask(column.id)}
+                className="h-8 w-8"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onEditColumn(column)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleDelete}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          <div
+            ref={setNodeRef}
+            className="min-h-[200px] space-y-2"
+          >
+            <SortableContext
+              items={taskIds}
+              strategy={verticalListSortingStrategy}
+            >
+              {tasks.map((task) => (
+                <TaskCard key={task.id} task={task} onEdit={onEditTask} />
+              ))}
+            </SortableContext>
+            {tasks.length === 0 && (
+              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground border-2 border-dashed rounded-lg">
+                Drop tasks here or click + to add
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

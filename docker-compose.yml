@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent-rangers-db
+    environment:
+      POSTGRES_USER: agent_rangers
+      POSTGRES_PASSWORD: agent_rangers_dev
+      POSTGRES_DB: agent_rangers
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_rangers -d agent_rangers"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent-rangers-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent-rangers-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agent_rangers:agent_rangers_dev@postgres:5432/agent_rangers
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000,http://192.168.1.225:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agent-rangers-frontend
+    environment:
+      VITE_API_URL: http://192.168.1.225:8000
+      VITE_WS_URL: ws://192.168.1.225:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev -- --host
+
+volumes:
+  postgres_data:
+  redis_data:
