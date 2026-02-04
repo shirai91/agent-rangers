@@ -123,10 +123,17 @@ export function Column({
                 <TaskCard key={task.id} task={task} onEdit={onEditTask} />
               ))}
             </SortableContext>
-            {tasks.length === 0 && (
+            {tasks.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm text-muted-foreground border-2 border-dashed rounded-lg">
                 Drop tasks here or click + to add
               </div>
+            ) : (
+              /* Drop zone at bottom - always visible when there are tasks */
+              <div className={`h-16 mt-2 rounded-lg border-2 border-dashed transition-colors ${
+                isOver && isValidDropTarget 
+                  ? 'border-primary bg-primary/10' 
+                  : 'border-transparent hover:border-muted-foreground/30'
+              }`} />
             )}
           </div>
         </CardContent>
