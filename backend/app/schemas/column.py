@@ -52,6 +52,7 @@ class ColumnUpdate(BaseModel):
     color: Optional[str] = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     wip_limit: Optional[int] = Field(None, ge=0)
     triggers_agents: Optional[bool] = None
+    agent_workflow_type: Optional[str] = None
     is_start_column: Optional[bool] = None
     is_end_column: Optional[bool] = None
 
@@ -66,6 +67,7 @@ class ColumnResponse(BaseModel):
     color: Optional[str] = None
     wip_limit: Optional[int] = None
     triggers_agents: bool
+    agent_workflow_type: Optional[str] = None
     is_start_column: bool
     is_end_column: bool
     created_at: datetime
