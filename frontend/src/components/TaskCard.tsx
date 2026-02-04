@@ -56,16 +56,35 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
     }
   };
 
-  const getPriorityColor = (priority: string | null) => {
-    switch (priority?.toLowerCase()) {
-      case 'high':
+  const getPriorityColor = (priority: number | null) => {
+    // Priority mapping: 0=none, 1=low, 2=medium, 3=high, 4=critical
+    switch (priority) {
+      case 4: // critical
         return 'destructive';
-      case 'medium':
+      case 3: // high
+        return 'destructive';
+      case 2: // medium
         return 'default';
-      case 'low':
+      case 1: // low
         return 'secondary';
-      default:
+      default: // 0 or null (none)
         return 'outline';
+    }
+  };
+
+  const getPriorityLabel = (priority: number | null): string => {
+    // Priority mapping: 0=none, 1=low, 2=medium, 3=high, 4=critical
+    switch (priority) {
+      case 4:
+        return 'Critical';
+      case 3:
+        return 'High';
+      case 2:
+        return 'Medium';
+      case 1:
+        return 'Low';
+      default:
+        return 'None';
     }
   };
 
@@ -166,9 +185,9 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
             </p>
           )}
           <div className="flex items-center gap-2 flex-wrap">
-            {task.priority && (
+            {task.priority !== null && task.priority !== 0 && (
               <Badge variant={getPriorityColor(task.priority)}>
-                {task.priority}
+                {getPriorityLabel(task.priority)}
               </Badge>
             )}
             {task.assigned_to && (

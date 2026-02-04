@@ -28,7 +28,7 @@ export interface Task {
   description: string | null;
   assigned_to: string | null;
   status: string;
-  priority: string | null;
+  priority: number | null;
   order: number;
   version: number;
   created_at: string;
@@ -52,7 +52,7 @@ export interface CreateTaskInput {
   title: string;
   description?: string;
   assigned_to?: string;
-  priority?: string;
+  priority?: number;
 }
 
 export interface UpdateBoardInput {
@@ -65,7 +65,7 @@ export interface UpdateTaskInput {
   description?: string;
   assigned_to?: string;
   status?: string;
-  priority?: string;
+  priority?: number;
 }
 
 export interface MoveTaskInput {

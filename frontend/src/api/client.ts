@@ -214,7 +214,7 @@ export const api = {
 
   getTask: (id: string) => fetchJSON<Task>(`/api/tasks/${encodeId(id)}`),
 
-  createTask: (boardId: string, data: { column_id: string; title: string; description?: string; assigned_to?: string; priority?: string }) =>
+  createTask: (boardId: string, data: { column_id: string; title: string; description?: string; assigned_to?: string; priority?: number }) =>
     fetchJSON<Task>(`/api/boards/${encodeId(boardId)}/tasks`, {
       method: 'POST',
       body: JSON.stringify(data),

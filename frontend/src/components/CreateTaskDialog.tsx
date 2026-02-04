@@ -25,7 +25,7 @@ export function CreateTaskDialog({ open, onOpenChange, boardId, columnId, editTa
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
-  const [priority, setPriority] = useState('');
+  const [priority, setPriority] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const { createTask, updateTask } = useBoardStore();
 
@@ -34,7 +34,7 @@ export function CreateTaskDialog({ open, onOpenChange, boardId, columnId, editTa
       setTitle(editTask.title);
       setDescription(editTask.description || '');
       setAssignedTo(editTask.assigned_to || '');
-      setPriority(editTask.priority || '');
+      setPriority(editTask.priority !== null ? String(editTask.priority) : '');
     } else {
       setTitle('');
       setDescription('');
@@ -49,12 +49,15 @@ export function CreateTaskDialog({ open, onOpenChange, boardId, columnId, editTa
 
     setLoading(true);
     try {
+      // Convert priority string to number (0-4)
+      const priorityValue = priority ? parseInt(priority, 10) : undefined;
+
       if (editTask) {
         await updateTask(editTask.id, {
           title: title.trim(),
           description: description.trim() || undefined,
           assigned_to: assignedTo.trim() || undefined,
-          priority: priority || undefined,
+          priority: priorityValue,
         });
       } else if (columnId) {
         await createTask(boardId, {
@@ -62,7 +65,7 @@ export function CreateTaskDialog({ open, onOpenChange, boardId, columnId, editTa
           title: title.trim(),
           description: description.trim() || undefined,
           assigned_to: assignedTo.trim() || undefined,
-          priority: priority || undefined,
+          priority: priorityValue,
         });
       }
       setTitle('');
@@ -128,9 +131,10 @@ export function CreateTaskDialog({ open, onOpenChange, boardId, columnId, editTa
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="">Select priority (optional)</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
+                <option value="1">Low</option>
+                <option value="2">Medium</option>
+                <option value="3">High</option>
+                <option value="4">Critical</option>
               </select>
             </div>
           </div>

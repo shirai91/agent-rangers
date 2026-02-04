@@ -76,10 +76,17 @@ class AgentContextBuilder:
         Returns:
             Context dictionary for developer agent
         """
-        # Get architecture output from previous phase
+        # Get architecture output from previous phase (from same execution)
         architecture_output = await AgentContextBuilder._get_phase_output(
             db, execution.id, "architecture"
         )
+
+        # If no architecture output in current execution and this is quick_development,
+        # look for previous architecture_only execution
+        if architecture_output is None and execution.workflow_type == "quick_development":
+            architecture_output = await AgentContextBuilder._get_previous_architecture_output(
+                db, task.id
+            )
 
         board = await AgentContextBuilder._get_board_with_columns(db, task.board_id)
 
@@ -100,7 +107,8 @@ class AgentContextBuilder:
         # Include architecture plan if available
         if architecture_output:
             context["architecture_plan"] = architecture_output.output_content
-            context["architecture_structured"] = architecture_output.output_structured
+            if architecture_output.output_structured:
+                context["architecture_structured"] = architecture_output.output_structured
 
         # Include previous review feedback if this is a revision iteration
         if execution.iteration > 1:
@@ -275,6 +283,53 @@ class AgentContextBuilder:
 
         result = await db.execute(query)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _get_previous_architecture_output(
+        db: AsyncSession,
+        task_id: UUID,
+    ) -> Optional[AgentOutput]:
+        """
+        Get architecture output from the most recent completed architecture_only execution.
+
+        This is used by quick_development workflow to leverage architecture from a
+        previous architecture_only execution if no architecture exists in the current execution.
+
+        Args:
+            db: Database session
+            task_id: Task UUID
+
+        Returns:
+            Agent output from architecture phase or None
+        """
+        # Find most recent completed architecture_only execution for this task
+        execution_query = (
+            select(AgentExecution)
+            .where(AgentExecution.task_id == task_id)
+            .where(AgentExecution.workflow_type == "architecture_only")
+            .where(AgentExecution.status == "completed")
+            .order_by(AgentExecution.created_at.desc())
+            .limit(1)
+        )
+
+        execution_result = await db.execute(execution_query)
+        previous_execution = execution_result.scalar_one_or_none()
+
+        if previous_execution is None:
+            return None
+
+        # Get the architecture phase output from that execution
+        output_query = (
+            select(AgentOutput)
+            .where(AgentOutput.execution_id == previous_execution.id)
+            .where(AgentOutput.phase == "architecture")
+            .where(AgentOutput.status == "completed")
+            .order_by(AgentOutput.iteration.desc())
+            .limit(1)
+        )
+
+        output_result = await db.execute(output_query)
+        return output_result.scalar_one_or_none()
 
     @staticmethod
     async def _get_all_execution_outputs(

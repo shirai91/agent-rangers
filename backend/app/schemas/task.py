@@ -1,7 +1,7 @@
 """Pydantic schemas for Task model."""
 
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
@@ -16,9 +16,49 @@ class TaskBase(BaseModel):
         default=0,
         ge=0,
         le=4,
-        description="Priority: 0=none, 1=low, 2=medium, 3=high, 4=urgent",
+        description="Priority: 0=none, 1=low, 2=medium, 3=high, 4=critical",
     )
     labels: List[str] = Field(default_factory=list, description="Task labels")
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def validate_priority(cls, v: Union[int, str]) -> int:
+        """
+        Validate and convert priority from string or integer to integer.
+
+        Accepts:
+        - Integer values: 0-4
+        - String values: 'none', 'low', 'medium', 'high', 'critical'
+
+        Returns integer representation (0-4).
+        """
+        # Priority mapping
+        priority_map = {
+            "none": 0,
+            "low": 1,
+            "medium": 2,
+            "high": 3,
+            "critical": 4,
+        }
+
+        # If already an integer, validate range
+        if isinstance(v, int):
+            if v < 0 or v > 4:
+                raise ValueError("Priority must be between 0 and 4")
+            return v
+
+        # If string, convert to integer
+        if isinstance(v, str):
+            normalized = v.lower().strip()
+            if normalized not in priority_map:
+                raise ValueError(
+                    f"Invalid priority string: '{v}'. "
+                    f"Valid values: {', '.join(priority_map.keys())}"
+                )
+            return priority_map[normalized]
+
+        # Invalid type
+        raise ValueError(f"Priority must be an integer (0-4) or string, got {type(v)}")
 
     @field_validator("labels")
     @classmethod
@@ -57,6 +97,50 @@ class TaskUpdate(BaseModel):
         None,
         description="Current version for optimistic locking",
     )
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def validate_priority(cls, v: Union[int, str, None]) -> Optional[int]:
+        """
+        Validate and convert priority from string or integer to integer.
+
+        Accepts:
+        - Integer values: 0-4
+        - String values: 'none', 'low', 'medium', 'high', 'critical'
+        - None (for optional updates)
+
+        Returns integer representation (0-4) or None.
+        """
+        if v is None:
+            return None
+
+        # Priority mapping
+        priority_map = {
+            "none": 0,
+            "low": 1,
+            "medium": 2,
+            "high": 3,
+            "critical": 4,
+        }
+
+        # If already an integer, validate range
+        if isinstance(v, int):
+            if v < 0 or v > 4:
+                raise ValueError("Priority must be between 0 and 4")
+            return v
+
+        # If string, convert to integer
+        if isinstance(v, str):
+            normalized = v.lower().strip()
+            if normalized not in priority_map:
+                raise ValueError(
+                    f"Invalid priority string: '{v}'. "
+                    f"Valid values: {', '.join(priority_map.keys())}"
+                )
+            return priority_map[normalized]
+
+        # Invalid type
+        raise ValueError(f"Priority must be an integer (0-4) or string, got {type(v)}")
 
     @field_validator("labels")
     @classmethod
