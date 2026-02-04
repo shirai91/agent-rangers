@@ -12,6 +12,6 @@ api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(websocket.router, prefix="/ws", tags=["websocket"])
 api_router.include_router(workflows.router, tags=["workflows"])
 api_router.include_router(activities.router, tags=["activities"])
-api_router.include_router(agents.router, tags=["agents"])
+api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 
 __all__ = ["api_router"]
