@@ -113,7 +113,7 @@ export function Column({
         <CardContent className="p-4 pt-0 flex-1 min-h-0 overflow-y-auto">
           <div
             ref={setNodeRef}
-            className={`space-y-2 ${tasks.length === 0 ? 'min-h-[200px] h-full' : ''}`}
+            className={`space-y-3 ${tasks.length === 0 ? 'min-h-[200px] h-full' : ''}`}
           >
             <SortableContext
               items={taskIds}

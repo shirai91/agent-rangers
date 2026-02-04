@@ -8,7 +8,9 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  closestCorners,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
 } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 import { Column } from './Column';
@@ -49,6 +51,18 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, 
       },
     })
   );
+
+  // Custom collision detection that works better for sortable lists
+  // Uses pointerWithin first (precise), falls back to rectIntersection (forgiving)
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    // First, try pointerWithin for precise detection
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) {
+      return pointerCollisions;
+    }
+    // Fall back to rectIntersection for more forgiving detection
+    return rectIntersection(args);
+  }, []);
 
   const sortedColumns = useMemo(() => {
     return [...columns].sort((a, b) => a.order - b.order);
@@ -168,7 +182,7 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, 
       <div className="flex gap-4 p-6 h-full">
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={collisionDetection}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
