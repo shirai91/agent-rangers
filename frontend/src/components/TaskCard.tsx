@@ -91,14 +91,31 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
     setShowExecutionPanel(true);
   };
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't trigger edit if clicking on buttons, dropdowns, or grip handle
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') ||
+      target.closest('[role="menu"]') ||
+      target.closest('[data-grip-handle]')
+    ) {
+      return;
+    }
+    onEdit(task);
+  };
+
   return (
     <div ref={setNodeRef} style={style}>
-      <Card className="mb-2 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow">
+      <Card 
+        className="mb-2 cursor-pointer hover:shadow-md transition-shadow"
+        onClick={handleCardClick}
+      >
         <CardHeader className="p-4 pb-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-2 flex-1 min-w-0">
               <button
-                className="mt-1 cursor-grab touch-none text-muted-foreground hover:text-foreground"
+                data-grip-handle
+                className="mt-1 cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
                 {...attributes}
                 {...listeners}
               >
