@@ -29,6 +29,7 @@ export function ColumnSettingsDialog({
   const [color, setColor] = useState('');
   const [wipLimit, setWipLimit] = useState<string>('');
   const [triggersAgents, setTriggersAgents] = useState(false);
+  const [agentWorkflowType, setAgentWorkflowType] = useState<string>('development');
   const [isStartColumn, setIsStartColumn] = useState(false);
   const [isEndColumn, setIsEndColumn] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -40,6 +41,7 @@ export function ColumnSettingsDialog({
       setColor(column.color || '');
       setWipLimit(column.wip_limit?.toString() || '');
       setTriggersAgents(column.triggers_agents);
+      setAgentWorkflowType(column.agent_workflow_type || 'development');
       setIsStartColumn(column.is_start_column);
       setIsEndColumn(column.is_end_column);
     }
@@ -58,6 +60,7 @@ export function ColumnSettingsDialog({
         color: color || undefined,
         wip_limit: wipLimit ? parseInt(wipLimit, 10) : null,
         triggers_agents: triggersAgents,
+        agent_workflow_type: triggersAgents ? agentWorkflowType : undefined,
         is_start_column: isStartColumn,
         is_end_column: isEndColumn,
       });
@@ -179,6 +182,25 @@ export function ColumnSettingsDialog({
                   </p>
                 </div>
               </label>
+
+              {triggersAgents && (
+                <div className="ml-7 space-y-2">
+                  <Label htmlFor="workflow-type" className="text-sm">Workflow Type</Label>
+                  <select
+                    id="workflow-type"
+                    value={agentWorkflowType}
+                    onChange={(e) => setAgentWorkflowType(e.target.value)}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                  >
+                    <option value="development">Development (Architect → Developer → Reviewer)</option>
+                    <option value="quick_development">Quick Development (Developer → Reviewer)</option>
+                    <option value="architecture_only">Architecture Only</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Select which AI workflow runs when tasks enter this column
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

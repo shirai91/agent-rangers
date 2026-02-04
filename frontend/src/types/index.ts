@@ -14,6 +14,7 @@ export interface Column {
   color?: string | null;
   wip_limit?: number | null;
   triggers_agents: boolean;
+  agent_workflow_type?: string | null;
   is_start_column: boolean;
   is_end_column: boolean;
   created_at: string;
@@ -192,6 +193,7 @@ export interface UpdateColumnInput {
   color?: string;
   wip_limit?: number | null;
   triggers_agents?: boolean;
+  agent_workflow_type?: string;
   is_start_column?: boolean;
   is_end_column?: boolean;
 }
