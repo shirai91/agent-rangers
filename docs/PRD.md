@@ -1,9 +1,9 @@
 # PRD.md - Product Requirements Document
 ## Agent Rangers: AI Multi-Agent Kanban Framework
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-03  
-**Status:** Phase 1 Complete, Phases 2-5 Pending
+**Version:** 2.0
+**Last Updated:** 2026-02-04
+**Status:** Phase 1-2 Complete, Phase 3 In Progress
 
 ---
 
@@ -18,7 +18,7 @@ Traditional Kanban boards require manual task execution. Software teams spend si
 ### 1.3 Solution
 A full-stack Kanban application with:
 - Standard board/column/task management with drag-and-drop
-- AI agent integration via Claude-Flow for automated task processing
+- AI agent integration via Hybrid Orchestrator (Direct API + Claude Agent SDK) for automated task processing
 - Workflow engine with configurable transitions and agent triggers
 - Knowledge base (RAG) for context-aware agent assistance
 
@@ -313,7 +313,7 @@ A full-stack Kanban application with:
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Claude-Flow API changes | Medium | High | Pin version, monitor releases |
+| Anthropic API changes | Medium | High | Pin SDK version, monitor releases |
 | Agent cost overrun | Medium | Medium | Implement cost limits, estimates |
 | Performance with large boards | Low | Medium | Implement pagination, virtualization |
 | WebSocket disconnects | Medium | Low | Auto-reconnect with exponential backoff |

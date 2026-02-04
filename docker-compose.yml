@@ -38,6 +38,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://agent_rangers:agent_rangers_dev@postgres:5432/agent_rangers
       REDIS_URL: redis://redis:6379
       CORS_ORIGINS: http://localhost:5173,http://localhost:3000,http://192.168.1.225:5173
+      USE_CLAUDE_FLOW: "true"
     ports:
       - "8000:8000"
     volumes:

@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "task-1770176558627-k97ubk": {
+      "taskId": "task-1770176558627-k97ubk",
+      "type": "implementation",
+      "description": "Test task: Design architecture for topic selection feature",
+      "priority": "normal",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [],
+      "createdAt": "2026-02-04T03:42:38.627Z",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  "version": "3.0.0"
+}

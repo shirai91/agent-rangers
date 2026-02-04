@@ -1,8 +1,8 @@
 # TECH_STACK.md - Technology Stack Specification
 ## Agent Rangers: Exact Versions and Dependencies
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-03
+**Version:** 2.0
+**Last Updated:** 2026-02-04
 
 ---
 
@@ -337,22 +337,23 @@ volumes:
 
 ---
 
-## 6. Future Dependencies (Phases 2-5)
+## 6. AI Integration Dependencies
 
-### 6.1 Phase 2: Workflow Engine
+### 6.1 Core AI Packages
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `anthropic` | ^0.40.0 | Direct Anthropic API for planning/review |
+| `claude-agent-sdk` | latest | CLI spawning for autonomous development |
+
+### 6.2 Frontend Workflow
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `xstate` | ^5.x | State machine for workflow |
 | `@xstate/react` | ^4.x | React XState bindings |
 
-### 6.2 Phase 3: Claude-Flow
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `claude-flow` | v3alpha | Multi-agent orchestration |
-
-### 6.3 Phase 4: Knowledge Base (RAG)
+### 6.3 Knowledge Base (RAG) - Phase 4
 
 | Package | Version | Purpose |
 |---------|---------|---------|

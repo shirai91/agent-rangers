@@ -1,8 +1,8 @@
 # IMPLEMENTATION_PLAN.md - Build Sequence
 ## Agent Rangers: Step-by-Step Implementation Guide
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-03
+**Version:** 2.0
+**Last Updated:** 2026-02-04
 
 ---
 
@@ -16,7 +16,7 @@ This document provides a **sequential build order** for Agent Rangers. Each step
 |-------|-------|----------|--------|
 | 1 | Core Kanban Foundation | 2 weeks | ✅ Complete |
 | 2 | Workflow Engine | 2 weeks | ✅ Complete |
-| 3 | Claude-Flow Integration | 3 weeks | ✅ Complete |
+| 3 | Hybrid Agent Integration | 3 weeks | ✅ Complete |
 | 4 | Knowledge Base (RAG) | 2 weeks | 🔲 Not Started |
 | 5 | Polish & Optimization | 3 weeks | 🔲 Not Started |
 
@@ -530,28 +530,31 @@ Add endpoints:
 
 ---
 
-## 4. Phase 3: Claude-Flow Integration ✅
+## 4. Phase 3: Hybrid Agent Integration ✅
 
-### Step 3.1: Claude-Flow Setup
+### Step 3.1: AI Dependencies Setup
 **Time:** 1 hour
 
 ```bash
-npm install -g claude-flow@v3alpha
-claude-flow init
-mkdir -p .claude/agents
+# Add to backend/requirements.txt
+pip install anthropic>=0.40.0
+pip install claude-agent-sdk
+
+# Create workspace directory
+mkdir -p workspaces
 ```
 
 ---
 
-### Step 3.2: Agent Definition Files
+### Step 3.2: Agent System Prompts
 **Time:** 2 hours
 
-Create YAML files:
+Create system prompts in code:
 
-1. `.claude/agents/software-architect.yml`
-2. `.claude/agents/software-developer.yml`
-3. `.claude/agents/code-reviewer.yml`
-4. `.claude/agents/queen-coordinator.yml`
+1. `ARCHITECT_SYSTEM_PROMPT` - For planning and design
+2. `DEVELOPER_SYSTEM_PROMPT` - For code implementation
+3. `REVIEWER_SYSTEM_PROMPT` - For code review
+4. Store in `backend/app/services/prompts.py`
 
 ---
 
@@ -575,15 +578,15 @@ Create migration `003_agent_execution.py`:
 
 ---
 
-### Step 3.5: Backend - Agent Orchestrator
+### Step 3.5: Backend - Hybrid Orchestrator
 **Time:** 4 hours
 
-Create AgentOrchestrator:
+Create HybridOrchestrator:
 
-1. Initialize claude-flow swarm
-2. Spawn agents
+1. Direct Anthropic API calls for architect/reviewer
+2. Claude Agent SDK for developer (CLI spawning)
 3. Execute workflows
-4. Stream output
+4. Stream output via Redis
 5. Handle completion
 
 ---
@@ -683,7 +686,7 @@ Add endpoints:
 1. Test full agent workflow
 2. Test output streaming
 3. Test cancellation
-4. Commit: "Phase 3 Complete: Claude-Flow Integration"
+4. Commit: "Phase 3 Complete: Hybrid Agent Integration"
 
 ---
 

@@ -473,8 +473,8 @@ class AgentOrchestrator:
         try:
             # Step 1: Spawn the agent
             spawn_cmd = [
-                "npx", "@claude-flow/cli@latest", "agent", "spawn",
-                "-t", agent_type,
+                "claude-flow", "agent", "spawn",
+                "--type", agent_type,
                 "--name", unique_name,
                 "--task", task_prompt,
                 "--output", "json",
@@ -528,7 +528,7 @@ class AgentOrchestrator:
 
             while elapsed < max_wait_time:
                 status_cmd = [
-                    "npx", "@claude-flow/cli@latest", "agent", "status", agent_id
+                    "claude-flow", "agent", "status", agent_id
                 ]
 
                 status_process = await asyncio.create_subprocess_exec(
@@ -577,7 +577,7 @@ class AgentOrchestrator:
 
             # Step 3: Get final output from logs
             logs_cmd = [
-                "npx", "@claude-flow/cli@latest", "agent", "logs", agent_id
+                "claude-flow", "agent", "logs", agent_id
             ]
 
             logs_process = await asyncio.create_subprocess_exec(

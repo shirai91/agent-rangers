@@ -1,4 +1,25 @@
-# Claude Code Configuration - Claude Flow V3
+# Claude Code Configuration - Agent Rangers
+
+## Documentation Sync (IMPORTANT)
+
+Documents MUST reflect the current project state. When making changes to the codebase, update the relevant documentation:
+
+| Document | Purpose |
+|----------|---------|
+| `docs/PRD.md` | Product requirements and scope |
+| `docs/APP_FLOW.md` | Application flow and user journeys |
+| `docs/TECH_STACK.md` | Technology choices and rationale |
+| `docs/FRONTEND_GUIDELINES.md` | Frontend architecture and patterns |
+| `docs/BACKEND_STRUCTURE.md` | Backend architecture and services |
+| `docs/IMPLEMENTATION_PLAN.md` | Implementation phases and progress |
+
+**Rules:**
+- Update docs when adding/removing features
+- Update docs when changing architecture decisions
+- Keep implementation status checkboxes current
+- Version bump PRD.md for significant changes
+
+---
 
 ## Behavioral Rules (Always Enforced)
 

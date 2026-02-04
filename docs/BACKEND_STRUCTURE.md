@@ -1,8 +1,8 @@
 # BACKEND_STRUCTURE.md - Backend Architecture
 ## Agent Rangers: Database Schema, API Contracts, and Service Layer
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-03
+**Version:** 2.0
+**Last Updated:** 2026-02-04
 
 ---
 
@@ -12,33 +12,41 @@
 backend/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI application entry
-│   ├── config.py            # Configuration settings
-│   ├── database.py          # Database connection & session
+│   ├── main.py                    # FastAPI application entry
+│   ├── config.py                  # Configuration settings
+│   ├── database.py                # Database connection & session
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── boards.py        # Board endpoints
-│   │   ├── columns.py       # Column endpoints
-│   │   ├── tasks.py         # Task endpoints
-│   │   └── websocket.py     # WebSocket handler
+│   │   ├── boards.py              # Board endpoints
+│   │   ├── columns.py             # Column endpoints
+│   │   ├── tasks.py               # Task endpoints
+│   │   ├── agents.py              # Agent execution endpoints
+│   │   └── websocket.py           # WebSocket handler
 │   ├── models/
 │   │   ├── __init__.py
-│   │   ├── board.py         # Board SQLAlchemy model
-│   │   ├── column.py        # Column SQLAlchemy model
-│   │   └── task.py          # Task SQLAlchemy model
+│   │   ├── board.py               # Board SQLAlchemy model
+│   │   ├── column.py              # Column SQLAlchemy model
+│   │   ├── task.py                # Task SQLAlchemy model
+│   │   └── agent_execution.py     # Agent execution model
 │   ├── schemas/
 │   │   ├── __init__.py
-│   │   ├── board.py         # Board Pydantic schemas
-│   │   ├── column.py        # Column Pydantic schemas
-│   │   └── task.py          # Task Pydantic schemas
+│   │   ├── board.py               # Board Pydantic schemas
+│   │   ├── column.py              # Column Pydantic schemas
+│   │   ├── task.py                # Task Pydantic schemas
+│   │   └── agent.py               # Agent execution schemas
 │   └── services/
 │       ├── __init__.py
-│       └── board_service.py # Business logic
+│       ├── board_service.py       # Board business logic
+│       └── hybrid_orchestrator.py # AI agent orchestration
 ├── alembic/
 │   ├── env.py
 │   ├── script.py.mako
 │   └── versions/
-│       └── 001_initial_schema.py
+│       ├── 001_initial_schema.py
+│       ├── 002_workflow_engine.py
+│       └── 003_agent_execution.py
+├── workspaces/                    # Agent workspace directories
+│   └── {task_id}/                 # Per-task isolated workspace
 ├── alembic.ini
 ├── requirements.txt
 ├── Dockerfile
@@ -736,7 +744,36 @@ WS /ws/board/{board_id}
 
 ## 6. Service Layer
 
-### 6.1 BoardService
+### 6.1 HybridOrchestrator (Agent Service)
+
+The `HybridOrchestrator` is the core service for AI agent execution, combining:
+- **Direct Anthropic API** for planning and review phases
+- **Claude Agent SDK** for autonomous development
+- **Text Editor Tool** for targeted code modifications
+
+```python
+# app/services/hybrid_orchestrator.py
+
+class HybridOrchestrator:
+    """Hybrid agent orchestration service"""
+
+    async def execute_workflow(self, task_id: str, description: str, workspace: str):
+        """Execute full architect → developer → reviewer workflow"""
+
+    async def _api_call(self, role: str, system_prompt: str, prompt: str) -> str:
+        """Direct Anthropic API call for planning/review"""
+
+    async def _cli_execute(self, task_id: str, workspace: str, prompt: str, role: str):
+        """Claude Agent SDK for autonomous file operations"""
+
+    async def _apply_review_fixes(self, task_id: str, workspace: str, review: str):
+        """Text Editor Tool for targeted fixes"""
+
+    async def _emit_activity(self, task_id: str, activity_type: str, data: dict):
+        """Emit activity to Redis pub/sub for real-time updates"""
+```
+
+### 6.2 BoardService
 
 ```python
 # app/services/board_service.py
