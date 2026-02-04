@@ -17,6 +17,7 @@ This document provides a **sequential build order** for Agent Rangers. Each step
 | 1 | Core Kanban Foundation | 2 weeks | ✅ Complete |
 | 2 | Workflow Engine | 2 weeks | ✅ Complete |
 | 3 | Hybrid Agent Integration | 3 weeks | ✅ Complete |
+| 3+ | Repository Awareness & Auto-Evaluation | 1 week | 🔲 Not Started |
 | 4 | Knowledge Base (RAG) | 2 weeks | 🔲 Not Started |
 | 5 | Polish & Optimization | 3 weeks | 🔲 Not Started |
 
@@ -690,7 +691,236 @@ Add endpoints:
 
 ---
 
-## 5. Phase 4: Knowledge Base (RAG) 🔲
+## 5. Phase 3+: Repository Awareness & Auto-Evaluation 🔲
+
+### Overview
+
+Phase 3+ introduces standardized file storage, repository awareness, and automatic task evaluation. This enables the system to intelligently determine which repository a task relates to and spawn agents in the correct working directory.
+
+### 5.0 Directory Structure
+
+```
+~/.agent-rangers/
+├── config.json                          # Global configuration
+├── boards/
+│   └── {board_id}/
+│       ├── board.json                   # Board metadata (working_directory, etc.)
+│       ├── repositories.jsonl           # Scanned repositories
+│       └── tasks/
+│           └── {task_id}/
+│               └── outputs/
+│                   ├── info.json        # Task evaluation result (repository, context)
+│                   ├── architecture.md  # Planning phase output
+│                   ├── review.md        # Review phase output
+│                   └── code/            # Generated code artifacts
+└── logs/                                # Application logs
+```
+
+---
+
+### Step 3+.1: File Storage Service
+**Time:** 2 hours
+
+Create `backend/app/services/file_storage.py`:
+
+1. `FileStorageService` class
+2. Initialize `~/.agent-rangers` directory structure
+3. Methods: `get_board_dir()`, `get_task_outputs_dir()`
+4. Methods: `save_output()`, `load_output()`
+5. Methods: `get_config()`, `save_config()`
+
+**Deliverables:**
+- [ ] FileStorageService created
+- [ ] Directory structure initializes on startup
+- [ ] Can save/load files to correct locations
+
+---
+
+### Step 3+.2: Database Migration - Board Working Directory
+**Time:** 1 hour
+
+Create migration `004_board_working_directory.py`:
+
+1. Add `working_directory` column to `boards` table (String, nullable)
+
+Update Board model and schemas.
+
+**Deliverables:**
+- [ ] Migration created and applied
+- [ ] Board model updated
+- [ ] Board schemas updated
+
+---
+
+### Step 3+.3: Repository Scanner Service
+**Time:** 2 hours
+
+Create `backend/app/services/repository_scanner.py`:
+
+1. `RepositoryScannerService` class
+2. `scan_working_directory()` - find git repos recursively
+3. `save_repositories()` - write to repositories.jsonl
+4. `load_repositories()` - read from repositories.jsonl
+5. `get_repository_info()` - get repo metadata (languages, etc.)
+
+**Deliverables:**
+- [ ] Scanner finds git repositories
+- [ ] Repositories saved to jsonl
+- [ ] Can load and query repositories
+
+---
+
+### Step 3+.4: Working Directory API
+**Time:** 1.5 hours
+
+Add endpoints to `backend/app/api/boards.py`:
+
+1. `PATCH /api/boards/{board_id}/working-directory` - Set working directory, trigger scan
+2. `GET /api/boards/{board_id}/repositories` - List scanned repositories
+3. `POST /api/boards/{board_id}/repositories/scan` - Re-scan repositories
+
+**Deliverables:**
+- [ ] Endpoints created
+- [ ] Setting working directory triggers scan
+- [ ] Repositories returned correctly
+
+---
+
+### Step 3+.5: Task Evaluator Service
+**Time:** 3 hours
+
+Create `backend/app/services/task_evaluator.py`:
+
+1. `TaskEvaluatorService` class
+2. `evaluate_task()` - Main evaluation method
+3. Build prompt with task title/description + repository list
+4. Call LLM to determine relevant repository
+5. Parse response into structured `info.json` format
+6. Save to `~/.agent-rangers/boards/{board_id}/tasks/{task_id}/outputs/info.json`
+
+**info.json Schema:**
+```json
+{
+  "task_id": "uuid",
+  "evaluated_at": "2026-02-04T00:00:00Z",
+  "repository": {
+    "path": "/path/to/repo",
+    "name": "repo-name",
+    "confidence": 0.95,
+    "reasoning": "Task mentions X, repo contains Y"
+  },
+  "context": {
+    "relevant_files": ["src/components/"],
+    "technologies": ["React", "TypeScript"]
+  }
+}
+```
+
+**Deliverables:**
+- [ ] TaskEvaluatorService created
+- [ ] LLM prompt working
+- [ ] info.json saved correctly
+
+---
+
+### Step 3+.6: Evaluate Workflow Type
+**Time:** 2 hours
+
+1. Add `evaluate` to WorkflowType enum
+2. Create evaluate workflow handler in AgentWorkflowService
+3. Auto-trigger evaluate on task create (in task create endpoint)
+4. Auto-trigger evaluate on task update (title/description change)
+
+**Deliverables:**
+- [ ] `evaluate` workflow type added
+- [ ] Auto-triggers on task create
+- [ ] Auto-triggers on task update
+
+---
+
+### Step 3+.7: Agent Runner Integration
+**Time:** 2 hours
+
+Update `backend/app/services/agent_runner.py`:
+
+1. Before running any phase, load `info.json` for the task
+2. If `info.json` exists and has repository path, use it as working directory
+3. If not, fall back to default workspace
+4. Spawn Claude CLI in the correct repository directory
+
+**Deliverables:**
+- [ ] AgentRunner reads info.json
+- [ ] Claude CLI spawns in repository directory
+- [ ] Fallback to default workspace works
+
+---
+
+### Step 3+.8: Migrate Existing Outputs
+**Time:** 1 hour
+
+1. Create migration script to move existing `/tmp/workspaces` outputs to new structure
+2. Update all file path references in code
+3. Clean up old workspace directories
+
+**Deliverables:**
+- [ ] Existing outputs migrated
+- [ ] Old paths updated
+- [ ] Cleanup complete
+
+---
+
+### Step 3+.9: Frontend - Board Settings Update
+**Time:** 2 hours
+
+Update board settings UI:
+
+1. Add "Working Directory" input field
+2. Add "Scan Repositories" button
+3. Show list of scanned repositories
+4. Show scan status/errors
+
+**Deliverables:**
+- [ ] Working directory setting in UI
+- [ ] Scan button works
+- [ ] Repositories displayed
+
+---
+
+### Step 3+.10: Frontend - Task Evaluation Display
+**Time:** 1.5 hours
+
+1. Show repository badge on TaskCard when info.json exists
+2. Show evaluation details in task execution panel
+3. Add "Re-evaluate" button
+4. Show confidence score and reasoning
+
+**Deliverables:**
+- [ ] Repository badge on task cards
+- [ ] Evaluation details visible
+- [ ] Re-evaluate button works
+
+---
+
+### Step 3+.11: Testing & Commit
+**Time:** 2 hours
+
+Test complete flow:
+
+1. Set board working directory
+2. Verify repositories scanned
+3. Create task, verify evaluate runs
+4. Verify info.json created with correct repository
+5. Run other workflow, verify it runs in correct directory
+
+**Deliverables:**
+- [ ] All features work end-to-end
+- [ ] Outputs in correct location
+- [ ] Agent runs in correct repository
+- [ ] Committed: "Phase 3+ Complete: Repository Awareness"
+
+---
+
+## 6. Phase 4: Knowledge Base (RAG) 🔲
 
 ### Step 4.1: pgvector Setup
 **Time:** 1 hour
@@ -777,7 +1007,7 @@ Add endpoints:
 
 ---
 
-## 6. Phase 5: Polish & Optimization 🔲
+## 7. Phase 5: Polish & Optimization 🔲
 
 ### Step 5.1: Performance Dashboard
 **Time:** 3 hours
@@ -871,7 +1101,7 @@ Add endpoints:
 
 ---
 
-## 7. Verification Checklist
+## 8. Verification Checklist
 
 ### After Each Step
 
@@ -891,7 +1121,7 @@ Add endpoints:
 
 ---
 
-## 8. Rollback Plan
+## 9. Rollback Plan
 
 If a step fails:
 
@@ -903,16 +1133,17 @@ If a step fails:
 
 ---
 
-## 9. Time Estimates Summary
+## 10. Time Estimates Summary
 
 | Phase | Estimated | Actual |
 |-------|-----------|--------|
 | Phase 1 | 40 hours | ~2 hours (AI-assisted) |
 | Phase 2 | 60 hours | TBD |
 | Phase 3 | 80 hours | TBD |
+| Phase 3+ | 20 hours | TBD |
 | Phase 4 | 60 hours | TBD |
 | Phase 5 | 50 hours | TBD |
-| **Total** | **290 hours** | TBD |
+| **Total** | **310 hours** | TBD |
 
 ---
 
