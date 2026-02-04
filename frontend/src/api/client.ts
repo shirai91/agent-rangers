@@ -319,25 +319,25 @@ export const api = {
 
   // Agent Workflow
   startAgentWorkflow: (taskId: string, data: StartAgentWorkflowInput) =>
-    fetchJSON<AgentExecution>(`/api/tasks/${encodeId(taskId)}/agent/start`, {
+    fetchJSON<AgentExecution>(`/api/agents/tasks/${encodeId(taskId)}/agent/start`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   getExecution: (executionId: string) =>
-    fetchJSON<AgentExecution>(`/api/executions/${encodeId(executionId)}`),
+    fetchJSON<AgentExecution>(`/api/agents/executions/${encodeId(executionId)}`),
 
   getExecutionStatus: (executionId: string) =>
-    fetchJSON<ExecutionStatusResponse>(`/api/executions/${encodeId(executionId)}/status`),
+    fetchJSON<ExecutionStatusResponse>(`/api/agents/executions/${encodeId(executionId)}/status`),
 
   cancelExecution: (executionId: string) =>
-    fetchJSON<void>(`/api/executions/${encodeId(executionId)}`, {
+    fetchJSON<void>(`/api/agents/executions/${encodeId(executionId)}`, {
       method: 'DELETE',
     }),
 
   getTaskExecutions: (taskId: string, limit?: number) =>
     fetchJSON<AgentExecution[]>(
-      `/api/tasks/${encodeId(taskId)}/executions${limit ? `?limit=${limit}` : ''}`
+      `/api/agents/tasks/${encodeId(taskId)}/executions${limit ? `?limit=${limit}` : ''}`
     ),
 
   getBoardExecutions: (boardId: string, statusFilter?: string, limit?: number) => {
@@ -346,7 +346,7 @@ export const api = {
     if (limit) params.append('limit', limit.toString());
     const queryString = params.toString();
     return fetchJSON<AgentExecution[]>(
-      `/api/boards/${encodeId(boardId)}/executions${queryString ? `?${queryString}` : ''}`
+      `/api/agents/boards/${encodeId(boardId)}/executions${queryString ? `?${queryString}` : ''}`
     );
   },
 };
