@@ -408,6 +408,7 @@ class AgentContextBuilder:
             "development": ["architecture", "development", "review"],
             "quick_development": ["development", "review"],
             "architecture_only": ["architecture"],
+            "review_only": ["review"],
         }
         return workflows.get(workflow_type, ["development", "review"])
 

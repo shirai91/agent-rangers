@@ -62,7 +62,7 @@ async def start_agent_workflow(
         )
 
     # Validate workflow type
-    valid_workflows = ["development", "quick_development", "architecture_only"]
+    valid_workflows = ["development", "quick_development", "architecture_only", "review_only"]
     if request_data.workflow_type not in valid_workflows:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

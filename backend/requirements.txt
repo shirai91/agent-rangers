@@ -31,3 +31,6 @@ orjson==3.10.7
 # Utilities
 python-dateutil==2.9.0
 PyYAML==6.0.1
+
+# AI Integration - Anthropic Claude
+anthropic>=0.40.0

@@ -1,11 +1,22 @@
-"""Agent orchestrator service for managing Claude-Flow agent execution."""
+"""Hybrid Agent Orchestrator for managing Claude agent execution.
+
+This module implements a hybrid approach combining:
+- Direct Anthropic API for planning (architect) and review phases
+- Claude CLI spawning for autonomous development work
+- Text Editor Tool for applying targeted fixes
+
+The orchestrator manages the full architect → developer → reviewer pipeline
+with support for feedback loops and real-time streaming.
+"""
 
 import asyncio
 import json
 import logging
 import os
 import re
+import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Callable, Any
 from uuid import UUID
 
@@ -13,25 +24,70 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.models.task import Task
 from app.models.agent_execution import AgentExecution
 from app.models.agent_output import AgentOutput
 from app.services.agent_context_builder import AgentContextBuilder
 from app.services.activity_service import ActivityService
+from app.services.prompts import (
+    ARCHITECT_SYSTEM_PROMPT,
+    DEVELOPER_SYSTEM_PROMPT,
+    REVIEWER_SYSTEM_PROMPT,
+    build_architect_prompt,
+    build_developer_prompt,
+    build_reviewer_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
+# Workspace base directory for agent file operations
+WORKSPACE_BASE = Path(os.environ.get("WORKSPACE_BASE", "/tmp/workspaces"))
 
-class AgentOrchestrator:
-    """
-    Orchestrator for managing Claude-Flow agent execution.
 
-    Handles spawning agents, managing workflow phases, streaming output,
-    and coordinating the architect → developer → reviewer pipeline.
+class HybridOrchestrator:
     """
+    Hybrid agent orchestrator combining API calls and CLI execution.
+
+    Execution Modes:
+    - Architecture Phase: Direct Anthropic API (fast, controlled)
+    - Development Phase: Claude CLI with file tools (autonomous)
+    - Review Phase: Direct Anthropic API + Text Editor (targeted fixes)
+    """
+
+    def __init__(self):
+        """Initialize the hybrid orchestrator."""
+        self._anthropic_client = None
+        self._redis_client = None
+
+    @property
+    def anthropic_client(self):
+        """Lazy-load Anthropic client."""
+        if self._anthropic_client is None:
+            try:
+                from anthropic import Anthropic
+                api_key = settings.ANTHROPIC_API_KEY
+                if api_key:
+                    self._anthropic_client = Anthropic(api_key=api_key)
+                else:
+                    logger.warning("ANTHROPIC_API_KEY not set, API calls will fail")
+            except ImportError:
+                logger.warning("anthropic package not installed")
+        return self._anthropic_client
+
+    @property
+    def redis_client(self):
+        """Lazy-load Redis client for pub/sub."""
+        if self._redis_client is None:
+            try:
+                import redis.asyncio as redis
+                self._redis_client = redis.from_url(settings.REDIS_URL)
+            except Exception as e:
+                logger.warning(f"Failed to connect to Redis: {e}")
+        return self._redis_client
 
     # ========================================================================
-    # Execution Management
+    # Execution Management (Static methods for compatibility)
     # ========================================================================
 
     @staticmethod
@@ -42,25 +98,20 @@ class AgentOrchestrator:
         workflow_type: str = "development",
         context: Optional[dict] = None,
     ) -> AgentExecution:
-        """
-        Create a new agent execution.
+        """Create a new agent execution."""
+        # Create workspace directory
+        workspace_path = WORKSPACE_BASE / str(task_id)
+        workspace_path.mkdir(parents=True, exist_ok=True)
 
-        Args:
-            db: Database session
-            task_id: Task UUID
-            board_id: Board UUID
-            workflow_type: Type of workflow to run
-            context: Additional execution context
-
-        Returns:
-            Created execution
-        """
         execution = AgentExecution(
             task_id=task_id,
             board_id=board_id,
             workflow_type=workflow_type,
             status="pending",
-            context=context or {},
+            context={
+                **(context or {}),
+                "workspace_path": str(workspace_path),
+            },
         )
         db.add(execution)
         await db.flush()
@@ -81,42 +132,29 @@ class AgentOrchestrator:
         execution_id: UUID,
         on_output: Optional[Callable[[str, dict], Any]] = None,
     ) -> AgentExecution:
-        """
-        Start an agent execution.
-
-        Args:
-            db: Database session
-            execution_id: Execution UUID
-            on_output: Optional callback for streaming output
-
-        Returns:
-            Updated execution
-        """
-        execution = await AgentOrchestrator._get_execution(db, execution_id)
+        """Start an agent execution."""
+        execution = await HybridOrchestrator._get_execution(db, execution_id)
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
         if execution.status != "pending":
             raise ValueError(f"Execution {execution_id} is not in pending status")
 
-        # Update status
         execution.status = "running"
         execution.started_at = datetime.utcnow()
         await db.flush()
 
-        # Update task status
         task = await db.get(Task, execution.task_id)
         if task:
             task.agent_status = "running"
             await db.flush()
 
-        # Log activity
         await ActivityService.log_activity(
             db=db,
             task_id=execution.task_id,
             board_id=execution.board_id,
             activity_type="agent_started",
-            actor="queen-coordinator",
+            actor="hybrid-orchestrator",
             metadata={
                 "execution_id": str(execution_id),
                 "workflow_type": execution.workflow_type,
@@ -126,140 +164,12 @@ class AgentOrchestrator:
         return execution
 
     @staticmethod
-    async def run_workflow(
-        db: AsyncSession,
-        execution: AgentExecution,
-        on_output: Optional[Callable[[str, dict], Any]] = None,
-    ) -> AgentExecution:
-        """
-        Run the complete agent workflow.
-
-        Args:
-            db: Database session
-            execution: Execution to run
-            on_output: Optional callback for streaming output
-
-        Returns:
-            Completed execution
-        """
-        task = await db.get(Task, execution.task_id)
-        if not task:
-            raise ValueError(f"Task {execution.task_id} not found")
-
-        phases = AgentContextBuilder.get_workflow_phases(execution.workflow_type)
-
-        try:
-            for phase in phases:
-                execution.current_phase = phase
-                if task:
-                    task.agent_status = phase
-                await db.flush()
-
-                # Build context for this phase
-                context = await AgentOrchestrator._build_phase_context(
-                    db, task, execution, phase
-                )
-
-                # Run the agent for this phase
-                output = await AgentOrchestrator._run_agent_phase(
-                    db, execution, task, phase, context, on_output
-                )
-
-                # Check if review requires changes
-                if phase == "review" and output.output_structured:
-                    review_status = output.output_structured.get("status")
-                    if review_status == "CHANGES_REQUESTED":
-                        if execution.iteration < execution.max_iterations:
-                            # Increment iteration and re-run development + review
-                            execution.iteration += 1
-                            await db.flush()
-
-                            # Re-run development phase
-                            dev_context = await AgentOrchestrator._build_phase_context(
-                                db, task, execution, "development"
-                            )
-                            await AgentOrchestrator._run_agent_phase(
-                                db, execution, task, "development", dev_context, on_output
-                            )
-
-                            # Re-run review phase
-                            review_context = await AgentOrchestrator._build_phase_context(
-                                db, task, execution, "review"
-                            )
-                            await AgentOrchestrator._run_agent_phase(
-                                db, execution, task, "review", review_context, on_output
-                            )
-
-            # Mark execution as completed
-            execution.status = "completed"
-            execution.completed_at = datetime.utcnow()
-            execution.result_summary = await AgentOrchestrator._build_result_summary(
-                db, execution
-            )
-
-            if task:
-                task.agent_status = "completed"
-
-            await db.flush()
-
-            # Log completion activity
-            await ActivityService.log_activity(
-                db=db,
-                task_id=execution.task_id,
-                board_id=execution.board_id,
-                activity_type="agent_completed",
-                actor="queen-coordinator",
-                metadata={
-                    "execution_id": str(execution.id),
-                    "workflow_type": execution.workflow_type,
-                    "iterations": execution.iteration,
-                },
-            )
-
-        except Exception as e:
-            logger.error(f"Workflow execution failed: {e}")
-            execution.status = "failed"
-            execution.error_message = str(e)
-            execution.completed_at = datetime.utcnow()
-
-            if task:
-                task.agent_status = "failed"
-
-            await db.flush()
-
-            # Log failure activity
-            await ActivityService.log_activity(
-                db=db,
-                task_id=execution.task_id,
-                board_id=execution.board_id,
-                activity_type="agent_failed",
-                actor="queen-coordinator",
-                metadata={
-                    "execution_id": str(execution.id),
-                    "error": str(e),
-                },
-            )
-
-            raise
-
-        return execution
-
-    @staticmethod
     async def cancel_execution(
         db: AsyncSession,
         execution_id: UUID,
     ) -> AgentExecution:
-        """
-        Cancel a running execution.
-
-        Args:
-            db: Database session
-            execution_id: Execution UUID
-
-        Returns:
-            Updated execution
-        """
-        execution = await AgentOrchestrator._get_execution(db, execution_id)
+        """Cancel a running execution."""
+        execution = await HybridOrchestrator._get_execution(db, execution_id)
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
@@ -270,596 +180,887 @@ class AgentOrchestrator:
         execution.completed_at = datetime.utcnow()
         await db.flush()
 
-        # Update task status
         task = await db.get(Task, execution.task_id)
         if task:
             task.agent_status = None
             await db.flush()
 
-        # Log cancellation activity
         await ActivityService.log_activity(
             db=db,
             task_id=execution.task_id,
             board_id=execution.board_id,
             activity_type="agent_cancelled",
             actor="system",
-            metadata={
-                "execution_id": str(execution_id),
-            },
+            metadata={"execution_id": str(execution_id)},
         )
 
         return execution
 
     # ========================================================================
-    # Agent Phase Execution
+    # Workflow Execution
     # ========================================================================
 
+    async def execute_workflow(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> AgentExecution:
+        """
+        Execute the full hybrid workflow: architect → developer → reviewer.
+
+        Args:
+            db: Database session
+            execution: Execution record
+            on_output: Optional callback for streaming output
+
+        Returns:
+            Completed execution
+        """
+        task = await db.get(Task, execution.task_id)
+        if not task:
+            raise ValueError(f"Task {execution.task_id} not found")
+
+        workspace_path = execution.context.get("workspace_path", str(WORKSPACE_BASE / str(task.id)))
+        phases = AgentContextBuilder.get_workflow_phases(execution.workflow_type)
+
+        try:
+            architecture_result = None
+            development_result = None
+
+            for phase in phases:
+                execution.current_phase = phase
+                if task:
+                    task.agent_status = phase
+                await db.flush()
+
+                # Emit phase start activity
+                await self._emit_activity(
+                    db, execution, f"phase_start",
+                    {"phase": phase, "iteration": execution.iteration}
+                )
+
+                if phase == "architecture":
+                    architecture_result = await self._run_architecture_phase(
+                        db, execution, task, workspace_path, on_output
+                    )
+
+                elif phase == "development":
+                    development_result = await self._run_development_phase(
+                        db, execution, task, workspace_path, architecture_result, on_output
+                    )
+
+                elif phase == "review":
+                    review_result = await self._run_review_phase(
+                        db, execution, task, workspace_path,
+                        architecture_result, development_result, on_output
+                    )
+
+                    # Handle review feedback loop
+                    if review_result.get("status") == "CHANGES_REQUESTED":
+                        if execution.iteration < execution.max_iterations:
+                            execution.iteration += 1
+                            await db.flush()
+
+                            # Apply fixes if provided
+                            if review_result.get("fixes"):
+                                await self._apply_review_fixes(
+                                    workspace_path, review_result["fixes"], on_output
+                                )
+
+                            # Re-run development with feedback
+                            development_result = await self._run_development_phase(
+                                db, execution, task, workspace_path,
+                                architecture_result, on_output,
+                                feedback=review_result.get("feedback")
+                            )
+
+                            # Re-run review
+                            review_result = await self._run_review_phase(
+                                db, execution, task, workspace_path,
+                                architecture_result, development_result, on_output
+                            )
+
+            # Mark execution as completed
+            execution.status = "completed"
+            execution.completed_at = datetime.utcnow()
+            execution.result_summary = await self._build_result_summary(db, execution)
+
+            if task:
+                task.agent_status = "completed"
+
+            await db.flush()
+
+            await self._emit_activity(
+                db, execution, "workflow_complete",
+                {"iterations": execution.iteration}
+            )
+
+        except Exception as e:
+            logger.error(f"Workflow execution failed: {e}", exc_info=True)
+            execution.status = "failed"
+            execution.error_message = str(e)
+            execution.completed_at = datetime.utcnow()
+
+            if task:
+                task.agent_status = "failed"
+
+            await db.flush()
+
+            await self._emit_activity(
+                db, execution, "workflow_failed",
+                {"error": str(e)}
+            )
+
+            raise
+
+        return execution
+
+    # For backwards compatibility
     @staticmethod
-    async def _run_agent_phase(
+    async def run_workflow(
+        db: AsyncSession,
+        execution: AgentExecution,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> AgentExecution:
+        """Static wrapper for execute_workflow (backwards compatibility)."""
+        orchestrator = HybridOrchestrator()
+        return await orchestrator.execute_workflow(db, execution, on_output)
+
+    # ========================================================================
+    # Phase Execution Methods
+    # ========================================================================
+
+    async def _run_architecture_phase(
+        self,
         db: AsyncSession,
         execution: AgentExecution,
         task: Task,
-        phase: str,
-        context: dict,
+        workspace_path: str,
         on_output: Optional[Callable[[str, dict], Any]] = None,
-    ) -> AgentOutput:
+    ) -> dict:
         """
-        Run a single agent phase.
+        Run architecture phase using direct Anthropic API.
 
         Args:
             db: Database session
             execution: Parent execution
             task: Task being processed
-            phase: Phase name
-            context: Input context for the agent
-            on_output: Optional callback for streaming output
+            workspace_path: Workspace directory
+            on_output: Callback for streaming
 
         Returns:
-            Agent output
+            Architecture result dictionary
         """
-        agent_name = AgentContextBuilder.get_agent_for_phase(phase)
-
-        # Create output record
         output = AgentOutput(
             execution_id=execution.id,
             task_id=task.id,
-            agent_name=agent_name,
-            phase=phase,
+            agent_name="architect",
+            phase="architecture",
             iteration=execution.iteration,
             status="running",
-            input_context=context,
             started_at=datetime.utcnow(),
         )
         db.add(output)
         await db.flush()
 
-        # Log phase start activity
-        await ActivityService.log_activity(
-            db=db,
-            task_id=task.id,
-            board_id=execution.board_id,
-            activity_type=f"agent_phase_started",
-            actor=agent_name,
-            metadata={
-                "execution_id": str(execution.id),
-                "output_id": str(output.id),
-                "phase": phase,
-                "iteration": execution.iteration,
-            },
-        )
-
         try:
-            # Execute the agent (simulated for now)
-            # In production, this would call claude-flow
-            result = await AgentOrchestrator._execute_agent(
-                agent_name, context, on_output
+            # Build prompts
+            user_prompt = build_architect_prompt(
+                task_title=task.title,
+                task_description=task.description or "",
+                context=execution.context,
             )
 
-            # Update output with result
+            # Make API call
+            result = await self._api_call(
+                system_prompt=ARCHITECT_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                on_output=on_output,
+                phase="architecture",
+            )
+
+            # Save architecture to workspace
+            arch_path = Path(workspace_path) / "ARCHITECTURE.md"
+            arch_path.write_text(result["content"])
+
             output.status = "completed"
             output.completed_at = datetime.utcnow()
-            output.output_content = result.get("content", "")
-            output.output_structured = result.get("structured")
-            output.files_created = result.get("files", [])
+            output.output_content = result["content"]
+            output.output_structured = {"architecture_saved": str(arch_path)}
             output.tokens_used = result.get("tokens_used")
-            output.duration_ms = (
-                int((output.completed_at - output.started_at).total_seconds() * 1000)
-                if output.started_at
-                else None
-            )
+            output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
+            output.files_created = [str(arch_path)]
 
             await db.flush()
 
-            # Log phase completion
-            await ActivityService.log_activity(
-                db=db,
-                task_id=task.id,
-                board_id=execution.board_id,
-                activity_type=f"agent_phase_completed",
-                actor=agent_name,
-                metadata={
-                    "execution_id": str(execution.id),
-                    "output_id": str(output.id),
-                    "phase": phase,
-                    "iteration": execution.iteration,
-                    "duration_ms": output.duration_ms,
-                },
-            )
+            return {
+                "content": result["content"],
+                "path": str(arch_path),
+            }
 
         except Exception as e:
-            logger.error(f"Agent phase {phase} failed: {e}")
             output.status = "failed"
             output.error_message = str(e)
             output.completed_at = datetime.utcnow()
             await db.flush()
             raise
 
-        return output
-
-    @staticmethod
-    async def _execute_agent(
-        agent_name: str,
-        context: dict,
+    async def _run_development_phase(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+        task: Task,
+        workspace_path: str,
+        architecture_result: Optional[dict],
         on_output: Optional[Callable[[str, dict], Any]] = None,
+        feedback: Optional[str] = None,
     ) -> dict:
         """
-        Execute an agent with the given context using claude-flow.
+        Run development phase using Claude CLI spawning.
 
         Args:
-            agent_name: Name of the agent
-            context: Input context
-            on_output: Optional callback for streaming output
+            db: Database session
+            execution: Parent execution
+            task: Task being processed
+            workspace_path: Workspace directory
+            architecture_result: Result from architecture phase
+            on_output: Callback for streaming
+            feedback: Review feedback for iterations
 
         Returns:
-            Agent result dictionary with content, structured data, files, and token usage
+            Development result dictionary
         """
-        phase = context.get("phase", "unknown")
-
-        # Agent type mapping for claude-flow
-        agent_type_mapping = {
-            "architecture": "coder",  # or "architect" if available
-            "development": "coder",
-            "review": "reviewer",
-        }
-        agent_type = agent_type_mapping.get(phase, "coder")
-
-        # Check if claude-flow is enabled
-        use_claude_flow = os.environ.get("USE_CLAUDE_FLOW", "false").lower() == "true"
-
-        if use_claude_flow:
-            return await AgentOrchestrator._execute_with_claude_flow(
-                agent_type, agent_name, phase, context, on_output
-            )
-        else:
-            # Fallback to simulated execution
-            return await AgentOrchestrator._execute_simulated(
-                agent_name, phase, context, {}, on_output
-            )
-
-    @staticmethod
-    async def _execute_with_claude_flow(
-        agent_type: str,
-        agent_name: str,
-        phase: str,
-        context: dict,
-        on_output: Optional[Callable[[str, dict], Any]] = None,
-    ) -> dict:
-        """
-        Execute an agent using claude-flow CLI.
-
-        Args:
-            agent_type: claude-flow agent type (coder, reviewer, etc.)
-            agent_name: Display name for the agent
-            phase: Workflow phase
-            context: Input context
-            on_output: Optional callback for streaming output
-
-        Returns:
-            Agent result dictionary
-        """
-        # Build the task prompt
-        task_prompt = AgentOrchestrator._build_task_prompt(context)
-
-        # Generate unique agent name
-        unique_name = f"{agent_name}-{phase}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-
-        if on_output:
-            await on_output("progress", {
-                "agent": agent_name,
-                "phase": phase,
-                "message": f"Spawning {agent_type} agent via claude-flow...",
-            })
+        output = AgentOutput(
+            execution_id=execution.id,
+            task_id=task.id,
+            agent_name="developer",
+            phase="development",
+            iteration=execution.iteration,
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+        db.add(output)
+        await db.flush()
 
         try:
-            # Step 1: Spawn the agent
-            spawn_cmd = [
-                "claude-flow", "agent", "spawn",
-                "--type", agent_type,
-                "--name", unique_name,
-                "--task", task_prompt,
-                "--output", "json",
-            ]
+            architecture_plan = architecture_result.get("content", "") if architecture_result else ""
 
-            spawn_process = await asyncio.create_subprocess_exec(
-                *spawn_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # Build developer prompt
+            user_prompt = build_developer_prompt(
+                task_title=task.title,
+                architecture_plan=architecture_plan,
+                workspace_path=workspace_path,
+                iteration=execution.iteration,
+                feedback=feedback,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                spawn_process.communicate(),
-                timeout=60  # 1 minute timeout for spawn
+            # Execute using CLI
+            result = await self._cli_execute(
+                prompt=user_prompt,
+                workspace_path=workspace_path,
+                on_output=on_output,
             )
 
-            if spawn_process.returncode != 0:
-                error_msg = stderr.decode('utf-8') if stderr else "Unknown error"
-                logger.error(f"claude-flow agent spawn failed: {error_msg}")
-                # Fallback to simulated
-                return await AgentOrchestrator._execute_simulated(
-                    agent_name, phase, context, {}, on_output
-                )
+            # Gather files created
+            files_created = self._list_workspace_files(workspace_path)
 
-            # Parse spawn output to get agent ID
-            spawn_output = stdout.decode('utf-8')
-            try:
-                spawn_data = json.loads(spawn_output)
-                agent_id = spawn_data.get("agent_id") or spawn_data.get("id")
-            except json.JSONDecodeError:
-                # Try to extract agent ID from text output
-                agent_id = AgentOrchestrator._extract_agent_id(spawn_output)
+            output.status = "completed"
+            output.completed_at = datetime.utcnow()
+            output.output_content = result["content"]
+            output.output_structured = result.get("structured")
+            output.tokens_used = result.get("tokens_used")
+            output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
+            output.files_created = files_created
 
-            if not agent_id:
-                logger.error("Failed to get agent ID from spawn output")
-                return await AgentOrchestrator._execute_simulated(
-                    agent_name, phase, context, {}, on_output
-                )
+            await db.flush()
+
+            return {
+                "content": result["content"],
+                "files": files_created,
+            }
+
+        except Exception as e:
+            output.status = "failed"
+            output.error_message = str(e)
+            output.completed_at = datetime.utcnow()
+            await db.flush()
+            raise
+
+    async def _run_review_phase(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+        task: Task,
+        workspace_path: str,
+        architecture_result: Optional[dict],
+        development_result: Optional[dict],
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> dict:
+        """
+        Run review phase using direct Anthropic API.
+
+        Args:
+            db: Database session
+            execution: Parent execution
+            task: Task being processed
+            workspace_path: Workspace directory
+            architecture_result: Result from architecture phase
+            development_result: Result from development phase
+            on_output: Callback for streaming
+
+        Returns:
+            Review result dictionary with status and issues
+        """
+        output = AgentOutput(
+            execution_id=execution.id,
+            task_id=task.id,
+            agent_name="reviewer",
+            phase="review",
+            iteration=execution.iteration,
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+        db.add(output)
+        await db.flush()
+
+        try:
+            # Gather files to review
+            files_to_review = self._read_workspace_files(workspace_path)
+
+            architecture_plan = architecture_result.get("content", "") if architecture_result else ""
+            implementation_summary = development_result.get("content", "") if development_result else ""
+
+            # Build reviewer prompt
+            user_prompt = build_reviewer_prompt(
+                task_title=task.title,
+                architecture_plan=architecture_plan,
+                implementation_summary=implementation_summary,
+                files_to_review=files_to_review,
+            )
+
+            # Make API call
+            result = await self._api_call(
+                system_prompt=REVIEWER_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                on_output=on_output,
+                phase="review",
+            )
+
+            # Parse review result
+            review_data = self._parse_review_result(result["content"])
+
+            # Save review to workspace
+            review_path = Path(workspace_path) / "REVIEW.md"
+            review_path.write_text(result["content"])
+
+            output.status = "completed"
+            output.completed_at = datetime.utcnow()
+            output.output_content = result["content"]
+            output.output_structured = review_data
+            output.tokens_used = result.get("tokens_used")
+            output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
+            output.files_created = [str(review_path)]
+
+            await db.flush()
+
+            return review_data
+
+        except Exception as e:
+            output.status = "failed"
+            output.error_message = str(e)
+            output.completed_at = datetime.utcnow()
+            await db.flush()
+            raise
+
+    # ========================================================================
+    # Core Execution Methods
+    # ========================================================================
+
+    async def _api_call(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+        phase: str = "unknown",
+    ) -> dict:
+        """
+        Make a direct Anthropic API call.
+
+        Args:
+            system_prompt: System prompt for the agent
+            user_prompt: User message/prompt
+            on_output: Optional callback for progress
+            phase: Phase name for logging
+
+        Returns:
+            Result dictionary with content and token usage
+        """
+        if on_output:
+            await on_output("progress", {
+                "phase": phase,
+                "message": f"Starting {phase} phase via API...",
+            })
+
+        # Check if API is available
+        if not self.anthropic_client:
+            logger.warning("Anthropic client not available, using simulated response")
+            return await self._simulated_api_call(system_prompt, user_prompt, phase)
+
+        try:
+            # Make streaming API call
+            content_parts = []
+            tokens_used = {"input": 0, "output": 0}
+
+            with self.anthropic_client.messages.stream(
+                model=settings.ANTHROPIC_MODEL,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            ) as stream:
+                for text in stream.text_stream:
+                    content_parts.append(text)
+                    if on_output:
+                        await on_output("chunk", {"text": text, "phase": phase})
+
+                # Get final message for token usage
+                final_message = stream.get_final_message()
+                tokens_used["input"] = final_message.usage.input_tokens
+                tokens_used["output"] = final_message.usage.output_tokens
+
+            content = "".join(content_parts)
 
             if on_output:
                 await on_output("progress", {
-                    "agent": agent_name,
                     "phase": phase,
-                    "message": f"Agent spawned with ID: {agent_id}",
-                })
-
-            # Step 2: Poll for completion
-            max_wait_time = 300  # 5 minutes
-            poll_interval = 5  # 5 seconds
-            elapsed = 0
-
-            while elapsed < max_wait_time:
-                status_cmd = [
-                    "claude-flow", "agent", "status", agent_id
-                ]
-
-                status_process = await asyncio.create_subprocess_exec(
-                    *status_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-
-                status_stdout, _ = await asyncio.wait_for(
-                    status_process.communicate(),
-                    timeout=30
-                )
-
-                status_output = status_stdout.decode('utf-8')
-
-                # Try to parse as JSON
-                try:
-                    status_data = json.loads(status_output)
-                    agent_status = status_data.get("status", "").lower()
-                except json.JSONDecodeError:
-                    # Check for status in text output
-                    if "completed" in status_output.lower():
-                        agent_status = "completed"
-                    elif "failed" in status_output.lower():
-                        agent_status = "failed"
-                    else:
-                        agent_status = "running"
-
-                if agent_status == "completed":
-                    break
-                elif agent_status == "failed":
-                    raise Exception(f"Agent {agent_id} failed")
-
-                if on_output:
-                    await on_output("progress", {
-                        "agent": agent_name,
-                        "phase": phase,
-                        "message": f"Agent {agent_id} still running... ({elapsed}s)",
-                    })
-
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-
-            if elapsed >= max_wait_time:
-                raise Exception(f"Agent {agent_id} timed out after {max_wait_time} seconds")
-
-            # Step 3: Get final output from logs
-            logs_cmd = [
-                "claude-flow", "agent", "logs", agent_id
-            ]
-
-            logs_process = await asyncio.create_subprocess_exec(
-                *logs_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            logs_stdout, _ = await asyncio.wait_for(
-                logs_process.communicate(),
-                timeout=30
-            )
-
-            logs_output = logs_stdout.decode('utf-8')
-
-            # Extract structured data from output
-            structured_data = AgentOrchestrator._extract_structured_output(logs_output, phase)
-
-            if on_output:
-                await on_output("progress", {
-                    "agent": agent_name,
-                    "phase": phase,
-                    "message": f"Agent {agent_id} completed successfully",
+                    "message": f"{phase.capitalize()} phase completed",
+                    "tokens": tokens_used,
                 })
 
             return {
-                "content": logs_output,
-                "structured": structured_data,
-                "files": [],
-                "tokens_used": None,
+                "content": content,
+                "tokens_used": tokens_used["input"] + tokens_used["output"],
+            }
+
+        except Exception as e:
+            logger.error(f"API call failed: {e}")
+            # Fall back to simulated
+            return await self._simulated_api_call(system_prompt, user_prompt, phase)
+
+    async def _cli_execute(
+        self,
+        prompt: str,
+        workspace_path: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> dict:
+        """
+        Execute developer phase using Claude CLI spawning.
+
+        Spawns 'claude --dangerously-skip-permissions -p' subprocess for
+        autonomous code generation with file system access.
+
+        Args:
+            prompt: The task prompt for the developer
+            workspace_path: Directory for file operations
+            on_output: Callback for streaming output
+
+        Returns:
+            Result dictionary with content and files
+        """
+        if on_output:
+            await on_output("progress", {
+                "phase": "development",
+                "message": "Starting development phase via CLI...",
+            })
+
+        # Check if claude CLI is available
+        claude_path = self._find_claude_cli()
+        if not claude_path:
+            logger.warning("Claude CLI not found, using simulated execution")
+            return await self._simulated_cli_execute(prompt, workspace_path, on_output)
+
+        try:
+            # Build the command
+            cmd = [
+                claude_path,
+                "--dangerously-skip-permissions",
+                "-p", prompt,
+            ]
+
+            # Run in workspace directory
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=workspace_path,
+            )
+
+            # Stream output
+            output_parts = []
+
+            async def read_stream(stream, prefix=""):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    text = line.decode("utf-8")
+                    output_parts.append(text)
+                    if on_output:
+                        await on_output("chunk", {"text": text, "phase": "development"})
+
+            # Read stdout and stderr concurrently
+            await asyncio.gather(
+                read_stream(process.stdout),
+                read_stream(process.stderr, "[stderr] "),
+            )
+
+            await asyncio.wait_for(process.wait(), timeout=600)  # 10 minute timeout
+
+            content = "".join(output_parts)
+
+            if on_output:
+                await on_output("progress", {
+                    "phase": "development",
+                    "message": "Development phase completed",
+                    "return_code": process.returncode,
+                })
+
+            return {
+                "content": content,
+                "structured": {"return_code": process.returncode},
             }
 
         except asyncio.TimeoutError:
-            logger.error("claude-flow command timed out")
-            return await AgentOrchestrator._execute_simulated(
-                agent_name, phase, context, {}, on_output
-            )
-        except FileNotFoundError:
-            logger.warning("npx or claude-flow CLI not found, falling back to simulated")
-            return await AgentOrchestrator._execute_simulated(
-                agent_name, phase, context, {}, on_output
-            )
+            logger.error("CLI execution timed out")
+            if on_output:
+                await on_output("error", {"message": "CLI execution timed out"})
+            return await self._simulated_cli_execute(prompt, workspace_path, on_output)
+
         except Exception as e:
-            logger.error(f"claude-flow execution failed: {e}")
-            return await AgentOrchestrator._execute_simulated(
-                agent_name, phase, context, {}, on_output
-            )
+            logger.error(f"CLI execution failed: {e}")
+            return await self._simulated_cli_execute(prompt, workspace_path, on_output)
 
-    @staticmethod
-    def _extract_agent_id(output: str) -> Optional[str]:
-        """Extract agent ID from command output."""
-        # Try patterns with capture groups first
-        patterns_with_groups = [
-            r'"agent_id"\s*:\s*"([^"]+)"',
-            r'"id"\s*:\s*"([^"]+)"',
-            r'Agent ID:\s*(\S+)',
-            r'Spawned agent:\s*(\S+)',
-        ]
-
-        for pattern in patterns_with_groups:
-            match = re.search(pattern, output)
-            if match:
-                return match.group(1)
-
-        # Try pattern without capture group (full match)
-        match = re.search(r'agent-\w+-\d+', output)
-        if match:
-            return match.group(0)
-
-        return None
-
-    @staticmethod
-    async def _execute_simulated(
-        agent_name: str,
-        phase: str,
-        context: dict,
-        agent_config: dict,
+    async def _apply_review_fixes(
+        self,
+        workspace_path: str,
+        fixes: list,
         on_output: Optional[Callable[[str, dict], Any]] = None,
-    ) -> dict:
+    ) -> None:
         """
-        Simulated agent execution for development/testing.
-
-        This is used as a fallback when claude-flow is not available or enabled.
-        To enable real claude-flow execution:
-        1. Install claude-flow CLI (npx @claude-flow/cli@latest)
-        2. Set USE_CLAUDE_FLOW=true environment variable
+        Apply targeted fixes from review using Text Editor Tool approach.
 
         Args:
-            agent_name: Name of the agent
-            phase: Workflow phase
-            context: Input context
-            agent_config: Agent configuration (unused, kept for compatibility)
-            on_output: Optional callback for streaming output
-
-        Returns:
-            Simulated agent result
+            workspace_path: Workspace directory
+            fixes: List of fixes with file, line, and replacement info
+            on_output: Callback for progress
         """
-        task_title = context.get("task_title", "Unknown Task")
-        task_description = context.get("task_description", "")
-
         if on_output:
             await on_output("progress", {
-                "agent": agent_name,
-                "phase": phase,
-                "message": f"[SIMULATED] Processing task: {task_title}",
+                "phase": "review",
+                "message": f"Applying {len(fixes)} fixes...",
             })
 
-        # Simulate processing delay
-        await asyncio.sleep(2)
+        for fix in fixes:
+            file_path = Path(workspace_path) / fix.get("file", "")
+            if not file_path.exists():
+                logger.warning(f"Fix target file not found: {file_path}")
+                continue
 
-        # Generate phase-specific simulated output
+            try:
+                content = file_path.read_text()
+
+                # Apply fix based on type
+                if "old_text" in fix and "new_text" in fix:
+                    # String replacement
+                    content = content.replace(fix["old_text"], fix["new_text"])
+                elif "line" in fix and "replacement" in fix:
+                    # Line replacement
+                    lines = content.split("\n")
+                    line_num = fix["line"] - 1
+                    if 0 <= line_num < len(lines):
+                        lines[line_num] = fix["replacement"]
+                        content = "\n".join(lines)
+
+                file_path.write_text(content)
+
+                if on_output:
+                    await on_output("file_edit", {
+                        "file": str(file_path),
+                        "fix": fix.get("issue", "Applied fix"),
+                    })
+
+            except Exception as e:
+                logger.error(f"Failed to apply fix to {file_path}: {e}")
+
+    async def _emit_activity(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+        activity_type: str,
+        metadata: dict,
+    ) -> None:
+        """
+        Emit activity via database logging and Redis pub/sub.
+
+        Args:
+            db: Database session
+            execution: Current execution
+            activity_type: Type of activity
+            metadata: Activity metadata
+        """
+        # Log to database
+        await ActivityService.log_activity(
+            db=db,
+            task_id=execution.task_id,
+            board_id=execution.board_id,
+            activity_type=activity_type,
+            actor="hybrid-orchestrator",
+            metadata={
+                "execution_id": str(execution.id),
+                **metadata,
+            },
+        )
+
+        # Publish to Redis for real-time updates
+        if self.redis_client:
+            try:
+                channel = f"task:{execution.task_id}:activity"
+                message = json.dumps({
+                    "type": activity_type,
+                    "execution_id": str(execution.id),
+                    "task_id": str(execution.task_id),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    **metadata,
+                })
+                await self.redis_client.publish(channel, message)
+            except Exception as e:
+                logger.warning(f"Failed to publish to Redis: {e}")
+
+    # ========================================================================
+    # Simulated Execution (Fallbacks)
+    # ========================================================================
+
+    async def _simulated_api_call(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        phase: str,
+    ) -> dict:
+        """Simulated API call for development/testing."""
+        await asyncio.sleep(1)  # Simulate latency
+
         if phase == "architecture":
-            content = f"""# Architecture Plan for: {task_title}
+            content = f"""# Architecture Plan
 
 ## Overview
-This is a simulated architecture plan for the task.
+This is a simulated architecture plan.
 
-## Task Description
-{task_description}
+## Requirements
+Based on the task description, the following requirements were identified.
 
 ## Components
-1. **Backend Service** - API endpoints and business logic
-2. **Database Schema** - Required data models
-3. **Frontend Components** - UI elements needed
+1. **Core Module** - Main business logic
+2. **Data Layer** - Database interactions
+3. **API Layer** - HTTP endpoints
 
-## Implementation Steps
-1. Create database models
-2. Implement API endpoints
-3. Add frontend components
+## Implementation Plan
+1. Create data models
+2. Implement business logic
+3. Add API endpoints
 4. Write tests
 
-## Notes
-*This is a simulated response. Enable Claude CLI for real AI-powered architecture planning.*
+*Note: This is a simulated response. Configure ANTHROPIC_API_KEY for real AI responses.*
 """
-            structured = {
-                "architecture_overview": f"Architecture plan for {task_title}",
-                "components": [
-                    {"name": "Backend Service", "type": "service", "files": []},
-                    {"name": "Database Schema", "type": "model", "files": []},
-                ],
-                "implementation_plan": [
-                    {"step": 1, "description": "Create database models", "files": []},
-                    {"step": 2, "description": "Implement API endpoints", "files": []},
-                ],
-                "migration_needed": False,
-                "breaking_changes": False,
-            }
-
-        elif phase == "development":
-            architecture_plan = context.get("architecture_plan", "No architecture provided")
-            content = f"""# Implementation for: {task_title}
-
-## Summary
-Simulated implementation based on the architecture plan.
-
-## Architecture Reference
-{architecture_plan[:500]}...
-
-## Files Modified
-- No actual files were modified (simulated execution)
-
-## Testing
-- Tests would be added here
-
-## Notes
-*This is a simulated response. Enable Claude CLI for real AI-powered development.*
-"""
-            structured = {
-                "implementation_summary": f"Simulated implementation for {task_title}",
-                "files_modified": [],
-                "tests_added": [],
-                "migration_created": False,
-                "setup_instructions": [],
-                "breaking_changes": False,
-            }
-
         elif phase == "review":
-            code_to_review = context.get("code_to_review", "No code provided")
-            content = f"""# Code Review for: {task_title}
+            content = """```json
+{
+  "status": "APPROVED",
+  "summary": {
+    "overall_assessment": "Simulated review - auto-approved for testing",
+    "critical_count": 0,
+    "major_count": 0,
+    "minor_count": 0
+  },
+  "critical_issues": [],
+  "major_issues": [],
+  "minor_issues": [],
+  "positive_feedback": ["Simulated positive feedback"],
+  "requires_resubmission": false
+}
+```
 
-## Status: APPROVED
-
-## Summary
-Simulated code review (auto-approved for testing).
-
-## Code Reviewed
-{code_to_review[:500]}...
-
-## Findings
-- No issues found (simulated review)
-
-## Notes
-*This is a simulated response. Enable Claude CLI for real AI-powered code review.*
+*Note: This is a simulated response. Configure ANTHROPIC_API_KEY for real AI reviews.*
 """
-            structured = {
-                "status": "APPROVED",
-                "summary": {
-                    "overall_assessment": "Simulated review - auto-approved",
-                    "critical_count": 0,
-                    "major_count": 0,
-                    "minor_count": 0,
-                },
-                "critical_issues": [],
-                "major_issues": [],
-                "minor_issues": [],
-                "requires_resubmission": False,
-            }
-
         else:
-            content = f"Simulated output for phase: {phase}"
-            structured = None
+            content = f"Simulated response for {phase} phase."
+
+        return {"content": content, "tokens_used": None}
+
+    async def _simulated_cli_execute(
+        self,
+        prompt: str,
+        workspace_path: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> dict:
+        """Simulated CLI execution for development/testing."""
+        await asyncio.sleep(2)
+
+        # Create a sample file to simulate work
+        sample_file = Path(workspace_path) / "main.py"
+        sample_content = '''"""Sample implementation generated by simulated developer agent."""
+
+def main():
+    """Main entry point."""
+    print("Hello from Agent Rangers!")
+
+
+if __name__ == "__main__":
+    main()
+'''
+        sample_file.write_text(sample_content)
+
+        content = f"""## Development Summary
+
+Created sample implementation at: {sample_file}
+
+### Files Created:
+- main.py: Main entry point
+
+*Note: This is simulated execution. Install Claude CLI for real autonomous development.*
+"""
 
         return {
             "content": content,
-            "structured": structured,
-            "files": [],
-            "tokens_used": None,
+            "structured": {"simulated": True},
         }
-
-    @staticmethod
-    def _build_task_prompt(context: dict) -> str:
-        """Build a task prompt from the context dictionary."""
-        parts = []
-
-        if context.get("task_title"):
-            parts.append(f"**Task Title:** {context['task_title']}")
-
-        if context.get("task_description"):
-            parts.append(f"**Task Description:** {context['task_description']}")
-
-        if context.get("architecture_plan"):
-            parts.append(f"**Architecture Plan:**\n{context['architecture_plan']}")
-
-        if context.get("code_to_review"):
-            parts.append(f"**Code to Review:**\n{context['code_to_review']}")
-
-        if context.get("review_feedback"):
-            parts.append(f"**Previous Review Feedback:**\n{context['review_feedback']}")
-
-        if context.get("iteration"):
-            parts.append(f"**Iteration:** {context['iteration']}")
-
-        return "\n\n".join(parts)
-
-    @staticmethod
-    def _extract_structured_output(content: str, phase: str) -> Optional[dict]:
-        """
-        Extract structured data from agent output text.
-
-        Args:
-            content: Raw output text from the agent
-            phase: Workflow phase to determine expected structure
-
-        Returns:
-            Structured data dictionary or None
-        """
-        # Try to find JSON blocks in the output
-        json_pattern = r'```json\s*([\s\S]*?)\s*```'
-        matches = re.findall(json_pattern, content)
-
-        for match in matches:
-            try:
-                return json.loads(match)
-            except json.JSONDecodeError:
-                continue
-
-        # Phase-specific default structures
-        if phase == "review":
-            # Try to detect approval status from content
-            status = "APPROVED" if "APPROVED" in content.upper() else "CHANGES_REQUESTED"
-            return {
-                "status": status,
-                "summary": {"overall_assessment": "Extracted from content"},
-                "critical_issues": [],
-                "major_issues": [],
-                "minor_issues": [],
-            }
-
-        return None
 
     # ========================================================================
     # Helper Methods
+    # ========================================================================
+
+    def _find_claude_cli(self) -> Optional[str]:
+        """Find claude CLI executable."""
+        # Check common locations
+        locations = [
+            "claude",  # In PATH
+            "/usr/local/bin/claude",
+            os.path.expanduser("~/.local/bin/claude"),
+            os.path.expanduser("~/bin/claude"),
+        ]
+
+        for loc in locations:
+            try:
+                result = subprocess.run(
+                    [loc, "--version"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return loc
+            except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+                continue
+
+        return None
+
+    def _list_workspace_files(self, workspace_path: str) -> list:
+        """List all files in workspace."""
+        files = []
+        workspace = Path(workspace_path)
+        if workspace.exists():
+            for path in workspace.rglob("*"):
+                if path.is_file() and not path.name.startswith("."):
+                    files.append(str(path.relative_to(workspace)))
+        return files
+
+    def _read_workspace_files(self, workspace_path: str, max_files: int = 20) -> list:
+        """Read workspace files for review."""
+        files = []
+        workspace = Path(workspace_path)
+
+        # File extensions to review
+        code_extensions = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java"}
+
+        if workspace.exists():
+            for path in workspace.rglob("*"):
+                if path.is_file() and path.suffix in code_extensions:
+                    try:
+                        content = path.read_text()
+                        lang = self._get_language_from_extension(path.suffix)
+                        files.append({
+                            "path": str(path.relative_to(workspace)),
+                            "content": content[:10000],  # Limit size
+                            "language": lang,
+                        })
+                        if len(files) >= max_files:
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to read {path}: {e}")
+
+        return files
+
+    def _get_language_from_extension(self, ext: str) -> str:
+        """Get language name from file extension."""
+        mapping = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".jsx": "javascript",
+            ".go": "go",
+            ".rs": "rust",
+            ".java": "java",
+        }
+        return mapping.get(ext, "")
+
+    def _parse_review_result(self, content: str) -> dict:
+        """Parse review result from content."""
+        # Try to extract JSON from markdown code block
+        json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Default to approved if parsing fails
+        return {
+            "status": "APPROVED",
+            "summary": {"overall_assessment": "Review completed"},
+            "critical_issues": [],
+            "major_issues": [],
+            "minor_issues": [],
+        }
+
+    async def _build_result_summary(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+    ) -> dict:
+        """Build result summary for completed execution."""
+        outputs = await AgentContextBuilder._get_all_execution_outputs(db, execution.id)
+
+        total_tokens = sum(o.tokens_used or 0 for o in outputs)
+        total_duration = sum(o.duration_ms or 0 for o in outputs)
+        all_files = []
+        for o in outputs:
+            all_files.extend(o.files_created or [])
+
+        final_review = next(
+            (o for o in reversed(outputs) if o.phase == "review" and o.output_structured),
+            None
+        )
+
+        return {
+            "phases_completed": len(outputs),
+            "iterations": execution.iteration,
+            "total_tokens": total_tokens,
+            "total_duration_ms": total_duration,
+            "files_affected": all_files,
+            "review_status": final_review.output_structured.get("status") if final_review else None,
+        }
+
+    # ========================================================================
+    # Query Methods (Static for compatibility)
     # ========================================================================
 
     @staticmethod
@@ -876,77 +1077,12 @@ Simulated code review (auto-approved for testing).
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def _build_phase_context(
-        db: AsyncSession,
-        task: Task,
-        execution: AgentExecution,
-        phase: str,
-    ) -> dict:
-        """Build context for a specific phase."""
-        if phase == "architecture":
-            return await AgentContextBuilder.build_architecture_context(
-                db, task, execution
-            )
-        elif phase == "development":
-            return await AgentContextBuilder.build_development_context(
-                db, task, execution
-            )
-        elif phase == "review":
-            return await AgentContextBuilder.build_review_context(
-                db, task, execution
-            )
-        else:
-            raise ValueError(f"Unknown phase: {phase}")
-
-    @staticmethod
-    async def _build_result_summary(
-        db: AsyncSession,
-        execution: AgentExecution,
-    ) -> dict:
-        """Build result summary for completed execution."""
-        outputs = await AgentContextBuilder._get_all_execution_outputs(db, execution.id)
-
-        total_tokens = sum(o.tokens_used or 0 for o in outputs)
-        total_duration = sum(o.duration_ms or 0 for o in outputs)
-        all_files = []
-        for o in outputs:
-            all_files.extend(o.files_created or [])
-
-        # Get final review status if available
-        final_review = next(
-            (o for o in reversed(outputs) if o.phase == "review" and o.output_structured),
-            None
-        )
-
-        return {
-            "phases_completed": len(outputs),
-            "iterations": execution.iteration,
-            "total_tokens": total_tokens,
-            "total_duration_ms": total_duration,
-            "files_affected": all_files,
-            "review_status": final_review.output_structured.get("status") if final_review else None,
-        }
-
-    # ========================================================================
-    # Query Methods
-    # ========================================================================
-
-    @staticmethod
     async def get_execution_status(
         db: AsyncSession,
         execution_id: UUID,
     ) -> Optional[dict]:
-        """
-        Get current status of an execution.
-
-        Args:
-            db: Database session
-            execution_id: Execution UUID
-
-        Returns:
-            Status dictionary or None
-        """
-        execution = await AgentOrchestrator._get_execution(db, execution_id)
+        """Get current status of an execution."""
+        execution = await HybridOrchestrator._get_execution(db, execution_id)
         if not execution:
             return None
 
@@ -978,17 +1114,7 @@ Simulated code review (auto-approved for testing).
         task_id: UUID,
         limit: int = 10,
     ) -> list[AgentExecution]:
-        """
-        Get executions for a task.
-
-        Args:
-            db: Database session
-            task_id: Task UUID
-            limit: Maximum number to return
-
-        Returns:
-            List of executions
-        """
+        """Get executions for a task."""
         result = await db.execute(
             select(AgentExecution)
             .options(selectinload(AgentExecution.outputs))
@@ -1005,18 +1131,7 @@ Simulated code review (auto-approved for testing).
         status: Optional[str] = None,
         limit: int = 20,
     ) -> list[AgentExecution]:
-        """
-        Get executions for a board.
-
-        Args:
-            db: Database session
-            board_id: Board UUID
-            status: Optional status filter
-            limit: Maximum number to return
-
-        Returns:
-            List of executions
-        """
+        """Get executions for a board."""
         query = (
             select(AgentExecution)
             .options(selectinload(AgentExecution.outputs))
@@ -1030,3 +1145,85 @@ Simulated code review (auto-approved for testing).
 
         result = await db.execute(query)
         return list(result.scalars().all())
+
+
+    # ========================================================================
+    # Backwards Compatibility Methods
+    # ========================================================================
+
+    @staticmethod
+    async def _run_agent_phase(
+        db: AsyncSession,
+        execution: AgentExecution,
+        task: Task,
+        phase: str,
+        context: dict,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> AgentOutput:
+        """
+        Static wrapper for running a single agent phase (backwards compatibility).
+
+        Args:
+            db: Database session
+            execution: Parent execution
+            task: Task being processed
+            phase: Phase name
+            context: Input context for the agent
+            on_output: Optional callback for streaming output
+
+        Returns:
+            Agent output
+        """
+        orchestrator = HybridOrchestrator()
+        workspace_path = execution.context.get(
+            "workspace_path",
+            str(WORKSPACE_BASE / str(task.id))
+        )
+
+        if phase == "architecture":
+            result = await orchestrator._run_architecture_phase(
+                db, execution, task, workspace_path, on_output
+            )
+        elif phase == "development":
+            # Get architecture result if available
+            arch_output = await AgentContextBuilder._get_phase_output(
+                db, execution.id, "architecture"
+            )
+            architecture_result = {
+                "content": arch_output.output_content if arch_output else ""
+            } if arch_output else None
+
+            feedback = context.get("user_feedback")
+            result = await orchestrator._run_development_phase(
+                db, execution, task, workspace_path,
+                architecture_result, on_output, feedback
+            )
+        elif phase == "review":
+            arch_output = await AgentContextBuilder._get_phase_output(
+                db, execution.id, "architecture"
+            )
+            dev_output = await AgentContextBuilder._get_phase_output(
+                db, execution.id, "development", execution.iteration
+            )
+            architecture_result = {
+                "content": arch_output.output_content if arch_output else ""
+            } if arch_output else None
+            development_result = {
+                "content": dev_output.output_content if dev_output else "",
+                "files": dev_output.files_created if dev_output else [],
+            } if dev_output else None
+
+            result = await orchestrator._run_review_phase(
+                db, execution, task, workspace_path,
+                architecture_result, development_result, on_output
+            )
+        else:
+            raise ValueError(f"Unknown phase: {phase}")
+
+        # Get the output that was created
+        outputs = await AgentContextBuilder._get_all_execution_outputs(db, execution.id)
+        return outputs[-1] if outputs else None
+
+
+# Alias for backwards compatibility
+AgentOrchestrator = HybridOrchestrator

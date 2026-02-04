@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api"
     DEBUG: bool = True
 
+    # AI Integration
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    USE_HYBRID_AGENTS: bool = True  # Enable hybrid agent mode (API + CLI)
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://agent_rangers:agent_rangers_dev@localhost:5432/agent_rangers"
 
