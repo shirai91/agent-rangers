@@ -2,11 +2,20 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including curl for NodeSource setup
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x LTS using NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install claude-flow CLI globally
+RUN npm install -g @claude-flow/cli@latest
 
 # Copy requirements first for better caching
 COPY requirements.txt .
