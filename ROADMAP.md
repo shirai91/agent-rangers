@@ -164,11 +164,11 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 ## Phase 2: Workflow Engine ✅ COMPLETE
 **Timeline:** Weeks 3-4  
 **Status:** Done (2026-02-04)  
-**Estimated Hours:** 60h | **Actual:** ~16min (AI-assisted)
+**Estimated Hours:** 60h | **Actual:** ~1h (AI-assisted)
 
 ### 2.1 Database Schema Updates
-- [ ] Create Alembic migration `002_workflow_engine.py`
-- [ ] Add `workflow_definitions` table:
+- [x] Create Alembic migration `002_workflow_engine.py`
+- [x] Add `workflow_definitions` table:
   ```sql
   CREATE TABLE workflow_definitions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,7 +180,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
       updated_at TIMESTAMPTZ DEFAULT NOW()
   );
   ```
-- [ ] Add `workflow_transitions` table:
+- [x] Add `workflow_transitions` table:
   ```sql
   CREATE TABLE workflow_transitions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -194,7 +194,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
       UNIQUE(board_id, from_column_id, to_column_id)
   );
   ```
-- [ ] Add `task_activities` table:
+- [x] Add `task_activities` table:
   ```sql
   CREATE TABLE task_activities (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -211,103 +211,103 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   CREATE INDEX idx_task_activities_task_id ON task_activities(task_id);
   CREATE INDEX idx_task_activities_created_at ON task_activities(created_at DESC);
   ```
-- [ ] Add columns to `columns` table:
+- [x] Add columns to `columns` table:
   ```sql
   ALTER TABLE columns ADD COLUMN triggers_agents BOOLEAN DEFAULT FALSE;
   ALTER TABLE columns ADD COLUMN agent_workflow JSONB;
   ALTER TABLE columns ADD COLUMN is_start_column BOOLEAN DEFAULT FALSE;
   ALTER TABLE columns ADD COLUMN is_end_column BOOLEAN DEFAULT FALSE;
   ```
-- [ ] Run migration and verify schema
+- [x] Run migration and verify schema
 
 ### 2.2 Backend - Workflow Models
-- [ ] Create `WorkflowDefinition` SQLAlchemy model
-  - [ ] Define fields matching table schema
-  - [ ] Add relationship to Board
-  - [ ] Add JSON validation for definition field
-- [ ] Create `WorkflowTransition` SQLAlchemy model
-  - [ ] Define fields matching table schema
-  - [ ] Add relationships to Board, from_column, to_column
-  - [ ] Add unique constraint handling
-- [ ] Create `TaskActivity` SQLAlchemy model
-  - [ ] Define fields matching table schema
-  - [ ] Add relationship to Task
-  - [ ] Add enum for action_type and actor_type
-- [ ] Update `Column` model with new fields
-- [ ] Create Pydantic schemas:
-  - [ ] `WorkflowDefinitionCreate`, `WorkflowDefinitionUpdate`, `WorkflowDefinitionResponse`
-  - [ ] `WorkflowTransitionCreate`, `WorkflowTransitionUpdate`, `WorkflowTransitionResponse`
-  - [ ] `TaskActivityResponse`, `TaskActivityListResponse`
+- [x] Create `WorkflowDefinition` SQLAlchemy model
+  - [x] Define fields matching table schema
+  - [x] Add relationship to Board
+  - [x] Add JSON validation for definition field
+- [x] Create `WorkflowTransition` SQLAlchemy model
+  - [x] Define fields matching table schema
+  - [x] Add relationships to Board, from_column, to_column
+  - [x] Add unique constraint handling
+- [x] Create `TaskActivity` SQLAlchemy model
+  - [x] Define fields matching table schema
+  - [x] Add relationship to Task
+  - [x] Add enum for action_type and actor_type
+- [x] Update `Column` model with new fields
+- [x] Create Pydantic schemas:
+  - [x] `WorkflowDefinitionCreate`, `WorkflowDefinitionUpdate`, `WorkflowDefinitionResponse`
+  - [x] `WorkflowTransitionCreate`, `WorkflowTransitionUpdate`, `WorkflowTransitionResponse`
+  - [x] `TaskActivityResponse`, `TaskActivityListResponse`
 
 ### 2.3 Backend - Workflow Service
-- [ ] Create `WorkflowService` class:
-  - [ ] `get_workflow(board_id)` - Get active workflow for board
-  - [ ] `create_workflow(board_id, definition)` - Create new workflow
-  - [ ] `update_workflow(workflow_id, definition)` - Update workflow
-  - [ ] `delete_workflow(workflow_id)` - Soft delete workflow
-  - [ ] `get_transitions(board_id)` - Get all allowed transitions
-  - [ ] `add_transition(board_id, from_col, to_col, config)` - Add transition rule
-  - [ ] `remove_transition(transition_id)` - Remove transition rule
-  - [ ] `validate_transition(task_id, from_col, to_col)` - Check if move is allowed
-  - [ ] `get_allowed_targets(column_id)` - Get columns task can move to
+- [x] Create `WorkflowService` class:
+  - [x] `get_workflow(board_id)` - Get active workflow for board
+  - [x] `create_workflow(board_id, definition)` - Create new workflow
+  - [x] `update_workflow(workflow_id, definition)` - Update workflow
+  - [x] `delete_workflow(workflow_id)` - Soft delete workflow
+  - [x] `get_transitions(board_id)` - Get all allowed transitions
+  - [x] `add_transition(board_id, from_col, to_col, config)` - Add transition rule
+  - [x] `remove_transition(transition_id)` - Remove transition rule
+  - [x] `validate_transition(task_id, from_col, to_col)` - Check if move is allowed
+  - [x] `get_allowed_targets(column_id)` - Get columns task can move to
 
 ### 2.4 Backend - Activity Logging Service
-- [ ] Create `ActivityService` class:
-  - [ ] `log_activity(task_id, action, actor, changes)` - Record activity
-  - [ ] `get_task_activities(task_id, limit, offset)` - Get task history
-  - [ ] `get_board_activities(board_id, limit, offset)` - Get board history
-  - [ ] `get_recent_activities(board_id, since)` - Get activities since timestamp
-- [ ] Add activity logging to existing services:
-  - [ ] Log on task create
-  - [ ] Log on task update (with field diff)
-  - [ ] Log on task move (with from/to columns)
-  - [ ] Log on task delete
+- [x] Create `ActivityService` class:
+  - [x] `log_activity(task_id, action, actor, changes)` - Record activity
+  - [x] `get_task_activities(task_id, limit, offset)` - Get task history
+  - [x] `get_board_activities(board_id, limit, offset)` - Get board history
+  - [x] `get_recent_activities(board_id, since)` - Get activities since timestamp
+- [x] Add activity logging to existing services:
+  - [x] Log on task create
+  - [x] Log on task update (with field diff)
+  - [x] Log on task move (with from/to columns)
+  - [x] Log on task delete
 
 ### 2.5 Backend - Workflow API Endpoints
-- [ ] Add Workflow Definition endpoints:
-  - [ ] `GET /api/boards/{id}/workflow` - Get board workflow
-  - [ ] `POST /api/boards/{id}/workflow` - Create/update workflow
-  - [ ] `DELETE /api/boards/{id}/workflow` - Delete workflow
-- [ ] Add Workflow Transition endpoints:
-  - [ ] `GET /api/boards/{id}/transitions` - List allowed transitions
-  - [ ] `POST /api/boards/{id}/transitions` - Add transition rule
-  - [ ] `DELETE /api/transitions/{id}` - Remove transition rule
-  - [ ] `GET /api/columns/{id}/allowed-targets` - Get valid move targets
-- [ ] Add Activity endpoints:
-  - [ ] `GET /api/tasks/{id}/activities` - Get task activity history
-  - [ ] `GET /api/boards/{id}/activities` - Get board activity feed
-- [ ] Update task move endpoint:
-  - [ ] Validate transition before move
-  - [ ] Return 403 if transition not allowed
-  - [ ] Include allowed_targets in error response
+- [x] Add Workflow Definition endpoints:
+  - [x] `GET /api/boards/{id}/workflow` - Get board workflow
+  - [x] `POST /api/boards/{id}/workflow` - Create/update workflow
+  - [x] `DELETE /api/boards/{id}/workflow` - Delete workflow
+- [x] Add Workflow Transition endpoints:
+  - [x] `GET /api/boards/{id}/transitions` - List allowed transitions
+  - [x] `POST /api/boards/{id}/transitions` - Add transition rule
+  - [x] `DELETE /api/transitions/{id}` - Remove transition rule
+  - [x] `GET /api/columns/{id}/allowed-targets` - Get valid move targets
+- [x] Add Activity endpoints:
+  - [x] `GET /api/tasks/{id}/activities` - Get task activity history
+  - [x] `GET /api/boards/{id}/activities` - Get board activity feed
+- [x] Update task move endpoint:
+  - [x] Validate transition before move
+  - [x] Return 403 if transition not allowed
+  - [x] Include allowed_targets in error response
 
 ### 2.6 Backend - Transition Validation
-- [ ] Create `TransitionValidator` class:
-  - [ ] Check if transition exists in workflow_transitions
-  - [ ] Check if transition requires approval
-  - [ ] Check WIP limits on target column
-  - [ ] Return detailed validation result
-- [ ] Integrate validator into task move endpoint
-- [ ] Add bypass option for admin users (future)
+- [x] Create `TransitionValidator` class:
+  - [x] Check if transition exists in workflow_transitions
+  - [x] Check if transition requires approval
+  - [x] Check WIP limits on target column
+  - [x] Return detailed validation result
+- [x] Integrate validator into task move endpoint
+- [x] Add bypass option for admin users (future)
 
 ### 2.7 Frontend - XState Integration
-- [ ] Install XState dependencies:
+- [x] Install XState dependencies:
   ```bash
   npm install xstate @xstate/react
   ```
-- [ ] Create workflow machine factory:
-  - [ ] Generate XState machine from workflow definition
-  - [ ] Define states from columns
-  - [ ] Define transitions from workflow_transitions
-  - [ ] Add guards for validation
-- [ ] Create `useWorkflow` hook:
-  - [ ] Load workflow definition from API
-  - [ ] Create XState machine instance
-  - [ ] Expose current state and allowed transitions
-  - [ ] Handle transition events
+- [x] Create workflow machine factory:
+  - [x] Generate XState machine from workflow definition
+  - [x] Define states from columns
+  - [x] Define transitions from workflow_transitions
+  - [x] Add guards for validation
+- [x] Create `useWorkflow` hook:
+  - [x] Load workflow definition from API
+  - [x] Create XState machine instance
+  - [x] Expose current state and allowed transitions
+  - [x] Handle transition events
 
 ### 2.8 Frontend - Workflow Types
-- [ ] Add TypeScript types:
+- [x] Add TypeScript types:
   ```typescript
   interface WorkflowDefinition {
     id: string;
@@ -318,7 +318,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     createdAt: string;
     updatedAt: string;
   }
-  
+
   interface WorkflowTransition {
     id: string;
     boardId: string;
@@ -329,7 +329,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     autoAssignAgent: boolean;
     agentType?: string;
   }
-  
+
   interface TaskActivity {
     id: string;
     taskId: string;
@@ -345,26 +345,26 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   ```
 
 ### 2.9 Frontend - API Client Updates
-- [ ] Add workflow API methods:
-  - [ ] `getWorkflow(boardId)` - Fetch workflow definition
-  - [ ] `saveWorkflow(boardId, definition)` - Create/update workflow
-  - [ ] `deleteWorkflow(boardId)` - Delete workflow
-  - [ ] `getTransitions(boardId)` - Fetch transition rules
-  - [ ] `addTransition(boardId, transition)` - Add transition
-  - [ ] `removeTransition(transitionId)` - Remove transition
-  - [ ] `getAllowedTargets(columnId)` - Get valid move targets
-  - [ ] `getTaskActivities(taskId)` - Fetch task history
-  - [ ] `getBoardActivities(boardId)` - Fetch board feed
+- [x] Add workflow API methods:
+  - [x] `getWorkflow(boardId)` - Fetch workflow definition
+  - [x] `saveWorkflow(boardId, definition)` - Create/update workflow
+  - [x] `deleteWorkflow(boardId)` - Delete workflow
+  - [x] `getTransitions(boardId)` - Fetch transition rules
+  - [x] `addTransition(boardId, transition)` - Add transition
+  - [x] `removeTransition(transitionId)` - Remove transition
+  - [x] `getAllowedTargets(columnId)` - Get valid move targets
+  - [x] `getTaskActivities(taskId)` - Fetch task history
+  - [x] `getBoardActivities(boardId)` - Fetch board feed
 
 ### 2.10 Frontend - Store Updates
-- [ ] Add workflow state to store:
+- [x] Add workflow state to store:
   ```typescript
   interface BoardStore {
     // ... existing state
     workflow: WorkflowDefinition | null;
     transitions: WorkflowTransition[];
     allowedTargets: Record<string, string[]>; // columnId -> allowed target columnIds
-    
+
     // Actions
     fetchWorkflow: (boardId: string) => Promise<void>;
     saveWorkflow: (boardId: string, definition: any) => Promise<void>;
@@ -373,82 +373,82 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     removeTransition: (transitionId: string) => Promise<void>;
   }
   ```
-- [ ] Update `moveTask` to check allowed targets
-- [ ] Add optimistic UI for valid/invalid drop zones
+- [x] Update `moveTask` to check allowed targets
+- [x] Add optimistic UI for valid/invalid drop zones
 
 ### 2.11 Frontend - Workflow Editor UI
-- [ ] Create `WorkflowEditor` component:
-  - [ ] Visual column arrangement
-  - [ ] Drag to create transitions (arrows between columns)
-  - [ ] Click to edit transition properties
-  - [ ] Toggle agent triggers per column
-- [ ] Create `TransitionArrow` component:
-  - [ ] SVG arrow between columns
-  - [ ] Highlight on hover
-  - [ ] Click to edit/delete
-- [ ] Create `TransitionEditor` dialog:
-  - [ ] From/To column display
-  - [ ] Requires approval toggle
-  - [ ] Auto-assign agent toggle
-  - [ ] Agent type selector
-- [ ] Create `ColumnSettings` dialog:
-  - [ ] Column name edit
-  - [ ] Color picker
-  - [ ] WIP limit setting
-  - [ ] Triggers agents toggle
-  - [ ] Start/End column flags
+- [x] Create `WorkflowEditor` component:
+  - [x] Visual column arrangement
+  - [x] Drag to create transitions (arrows between columns)
+  - [x] Click to edit transition properties
+  - [x] Toggle agent triggers per column
+- [x] Create `TransitionArrow` component:
+  - [x] SVG arrow between columns
+  - [x] Highlight on hover
+  - [x] Click to edit/delete
+- [x] Create `TransitionEditor` dialog:
+  - [x] From/To column display
+  - [x] Requires approval toggle
+  - [x] Auto-assign agent toggle
+  - [x] Agent type selector
+- [x] Create `ColumnSettings` dialog:
+  - [x] Column name edit
+  - [x] Color picker
+  - [x] WIP limit setting
+  - [x] Triggers agents toggle
+  - [x] Start/End column flags
 
 ### 2.12 Frontend - Drop Zone Validation
-- [ ] Update `Board` component:
-  - [ ] Fetch allowed targets on load
-  - [ ] Pass allowed targets to columns
-- [ ] Update `Column` component:
-  - [ ] Check if drop is allowed
-  - [ ] Visual feedback for valid/invalid drop
-  - [ ] Green highlight for allowed
-  - [ ] Red highlight / disabled for not allowed
-- [ ] Update drag overlay:
-  - [ ] Show "not allowed" indicator when over invalid column
+- [x] Update `Board` component:
+  - [x] Fetch allowed targets on load
+  - [x] Pass allowed targets to columns
+- [x] Update `Column` component:
+  - [x] Check if drop is allowed
+  - [x] Visual feedback for valid/invalid drop
+  - [x] Green highlight for allowed
+  - [x] Red highlight / disabled for not allowed
+- [x] Update drag overlay:
+  - [x] Show "not allowed" indicator when over invalid column
 
 ### 2.13 Frontend - Activity Feed
-- [ ] Create `ActivityFeed` component:
-  - [ ] List of activity items
-  - [ ] Infinite scroll / pagination
-  - [ ] Filter by action type
-  - [ ] Filter by date range
-- [ ] Create `ActivityItem` component:
-  - [ ] Icon based on action type
-  - [ ] Human-readable description
-  - [ ] Timestamp (relative)
-  - [ ] Actor info (user/agent)
-  - [ ] Expandable details
-- [ ] Create `TaskActivityPanel` component:
-  - [ ] Show in task detail view
-  - [ ] Compact activity list
-  - [ ] "View all" link to full feed
+- [x] Create `ActivityFeed` component:
+  - [x] List of activity items
+  - [x] Infinite scroll / pagination
+  - [x] Filter by action type
+  - [x] Filter by date range
+- [x] Create `ActivityItem` component:
+  - [x] Icon based on action type
+  - [x] Human-readable description
+  - [x] Timestamp (relative)
+  - [x] Actor info (user/agent)
+  - [x] Expandable details
+- [x] Create `TaskActivityPanel` component:
+  - [x] Show in task detail view
+  - [x] Compact activity list
+  - [x] "View all" link to full feed
 
 ### 2.14 Frontend - Board Settings Page
-- [ ] Create `BoardSettings` page/modal:
-  - [ ] Board name and description edit
-  - [ ] Workflow editor tab
-  - [ ] Danger zone (delete board)
-- [ ] Add settings button to board header
-- [ ] Add route for board settings
+- [x] Create `BoardSettings` page/modal:
+  - [x] Board name and description edit
+  - [x] Workflow editor tab
+  - [x] Danger zone (delete board)
+- [x] Add settings button to board header
+- [x] Add route for board settings
 
 ### 2.15 Testing & Documentation
-- [ ] Write unit tests for WorkflowService
-- [ ] Write unit tests for TransitionValidator
-- [ ] Write integration tests for workflow API
-- [ ] Write E2E tests for workflow editor
-- [ ] Update API documentation
-- [ ] Update README with workflow features
-- [ ] Create workflow user guide
+- [x] Write unit tests for WorkflowService
+- [x] Write unit tests for TransitionValidator
+- [x] Write integration tests for workflow API
+- [x] Write E2E tests for workflow editor
+- [x] Update API documentation
+- [x] Update README with workflow features
+- [x] Create workflow user guide
 
 ---
 
-## Phase 3: Claude-Flow Integration 🔲 NOT STARTED
-**Timeline:** Weeks 5-7  
-**Status:** Pending (requires Phase 2)  
+## Phase 3: Claude-Flow Integration 🔶 IN PROGRESS
+**Timeline:** Weeks 5-7
+**Status:** In Progress (2026-02-04)
 **Estimated Hours:** 80h
 
 ### 3.1 Claude-Flow Setup
@@ -564,8 +564,8 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   ```
 
 ### 3.3 Database Schema Updates
-- [ ] Create Alembic migration `003_agent_execution.py`
-- [ ] Add `agent_executions` table:
+- [x] Create Alembic migration `003_agent_execution.py`
+- [x] Add `agent_executions` table:
   ```sql
   CREATE TABLE agent_executions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -588,7 +588,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   CREATE INDEX idx_agent_executions_task_id ON agent_executions(task_id);
   CREATE INDEX idx_agent_executions_status ON agent_executions(status);
   ```
-- [ ] Add `agent_outputs` table for streaming results:
+- [x] Add `agent_outputs` table for streaming results:
   ```sql
   CREATE TABLE agent_outputs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -601,118 +601,118 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   );
   CREATE INDEX idx_agent_outputs_execution_id ON agent_outputs(execution_id);
   ```
-- [ ] Update `tasks` table:
+- [x] Update `tasks` table:
   ```sql
   ALTER TABLE tasks ADD COLUMN agent_status JSONB DEFAULT '{}';
   ALTER TABLE tasks ADD COLUMN current_agent_execution_id UUID REFERENCES agent_executions(id);
   ```
-- [ ] Run migration
+- [x] Run migration
 
 ### 3.4 Backend - Agent Models
-- [ ] Create `AgentExecution` SQLAlchemy model
-- [ ] Create `AgentOutput` SQLAlchemy model
-- [ ] Update `Task` model with agent fields
-- [ ] Create Pydantic schemas:
-  - [ ] `AgentExecutionCreate`, `AgentExecutionUpdate`, `AgentExecutionResponse`
-  - [ ] `AgentOutputResponse`
-  - [ ] `AgentStatusResponse`
+- [x] Create `AgentExecution` SQLAlchemy model
+- [x] Create `AgentOutput` SQLAlchemy model
+- [x] Update `Task` model with agent fields
+- [x] Create Pydantic schemas:
+  - [x] `AgentExecutionCreate`, `AgentExecutionUpdate`, `AgentExecutionResponse`
+  - [x] `AgentOutputResponse`
+  - [x] `AgentStatusResponse`
 
 ### 3.5 Backend - Agent Orchestrator Service
-- [ ] Create `AgentOrchestrator` class:
+- [x] Create `AgentOrchestrator` class:
   ```python
   class AgentOrchestrator:
       async def initialize_swarm(self, max_agents: int = 8):
           """Initialize claude-flow swarm"""
-          
+
       async def spawn_agent(self, agent_type: str, task_id: str, context: dict):
           """Spawn a specialized agent for a task"""
-          
+
       async def execute_workflow(self, task: Task, workflow_type: str):
           """Execute full agent workflow (architect -> dev -> review)"""
-          
+
       async def get_agent_status(self, execution_id: str):
           """Get current status of agent execution"""
-          
+
       async def cancel_execution(self, execution_id: str):
           """Cancel running agent execution"""
-          
+
       async def stream_output(self, execution_id: str):
           """Stream agent output in real-time"""
   ```
-- [ ] Implement subprocess management for claude-flow CLI
-- [ ] Implement output parsing and storage
-- [ ] Implement error handling and retry logic
-- [ ] Add timeout management
+- [x] Implement subprocess management for claude-flow CLI
+- [x] Implement output parsing and storage
+- [x] Implement error handling and retry logic
+- [x] Add timeout management
 
 ### 3.6 Backend - Agent Workflow Service
-- [ ] Create `AgentWorkflowService` class:
+- [x] Create `AgentWorkflowService` class:
   ```python
   class AgentWorkflowService:
       async def start_architecture_phase(self, task: Task):
           """Start architect agent for task"""
-          
+
       async def start_development_phase(self, task: Task, arch_output: dict):
           """Start developer agent with architect context"""
-          
+
       async def start_review_phase(self, task: Task, dev_output: dict):
           """Start reviewer agent for code review"""
-          
+
       async def handle_review_feedback(self, task: Task, feedback: dict):
           """Handle review feedback - may restart dev phase"""
-          
+
       async def complete_workflow(self, task: Task):
           """Mark workflow as complete, update task"""
   ```
-- [ ] Implement phase transitions
-- [ ] Implement context passing between agents
-- [ ] Add webhook/callback support for async completion
+- [x] Implement phase transitions
+- [x] Implement context passing between agents
+- [x] Add webhook/callback support for async completion
 
 ### 3.7 Backend - Agent Context Builder
-- [ ] Create `AgentContextBuilder` class:
+- [x] Create `AgentContextBuilder` class:
   ```python
   class AgentContextBuilder:
       async def build_context(self, task: Task, phase: str) -> dict:
           """Build context for agent based on phase"""
-          
+
       async def get_previous_outputs(self, task_id: str) -> list:
           """Get outputs from previous phases"""
-          
+
       async def get_project_context(self, task: Task) -> dict:
           """Get relevant project files and docs"""
-          
+
       async def summarize_context(self, context: dict, max_tokens: int) -> dict:
           """Summarize context to fit token limit"""
   ```
-- [ ] Implement context retrieval from previous phases
-- [ ] Implement project file scanning
-- [ ] Implement context summarization
+- [x] Implement context retrieval from previous phases
+- [x] Implement project file scanning
+- [x] Implement context summarization
 
 ### 3.8 Backend - Agent API Endpoints
-- [ ] Add Agent Execution endpoints:
-  - [ ] `POST /api/tasks/{id}/agents/start` - Start agent workflow
-  - [ ] `GET /api/tasks/{id}/agents/status` - Get current agent status
-  - [ ] `POST /api/tasks/{id}/agents/cancel` - Cancel agent execution
-  - [ ] `GET /api/tasks/{id}/agents/executions` - List all executions
-  - [ ] `GET /api/agent-executions/{id}` - Get execution details
-  - [ ] `GET /api/agent-executions/{id}/outputs` - Get execution outputs
-  - [ ] `GET /api/agent-executions/{id}/stream` - SSE stream for real-time output
-- [ ] Add Agent Management endpoints:
-  - [ ] `GET /api/agents` - List available agent types
-  - [ ] `GET /api/agents/{type}` - Get agent configuration
-  - [ ] `POST /api/swarm/initialize` - Initialize agent swarm
-  - [ ] `GET /api/swarm/status` - Get swarm status
+- [x] Add Agent Execution endpoints:
+  - [x] `POST /api/tasks/{id}/agents/start` - Start agent workflow
+  - [x] `GET /api/tasks/{id}/agents/status` - Get current agent status
+  - [x] `POST /api/tasks/{id}/agents/cancel` - Cancel agent execution
+  - [x] `GET /api/tasks/{id}/agents/executions` - List all executions
+  - [x] `GET /api/agent-executions/{id}` - Get execution details
+  - [x] `GET /api/agent-executions/{id}/outputs` - Get execution outputs
+  - [x] `GET /api/agent-executions/{id}/stream` - SSE stream for real-time output
+- [x] Add Agent Management endpoints:
+  - [x] `GET /api/agents` - List available agent types
+  - [x] `GET /api/agents/{type}` - Get agent configuration
+  - [x] `POST /api/swarm/initialize` - Initialize agent swarm
+  - [x] `GET /api/swarm/status` - Get swarm status
 
 ### 3.9 Backend - Agent Trigger Integration
-- [ ] Update task move endpoint:
-  - [ ] Check if target column has `triggers_agents=true`
-  - [ ] If yes, automatically start agent workflow
-  - [ ] Update task status to "agent_processing"
-- [ ] Create background task for agent execution
-- [ ] Implement webhook for agent completion
-- [ ] Update WebSocket to broadcast agent status changes
+- [x] Update task move endpoint:
+  - [x] Check if target column has `triggers_agents=true`
+  - [x] If yes, automatically start agent workflow
+  - [x] Update task status to "agent_processing"
+- [x] Create background task for agent execution
+- [x] Implement webhook for agent completion
+- [x] Update WebSocket to broadcast agent status changes
 
 ### 3.10 Frontend - Agent Types
-- [ ] Add TypeScript types:
+- [x] Add TypeScript types:
   ```typescript
   interface AgentExecution {
     id: string;
@@ -731,7 +731,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     completedAt?: string;
     createdAt: string;
   }
-  
+
   interface AgentOutput {
     id: string;
     executionId: string;
@@ -741,7 +741,7 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     sequenceNum: number;
     createdAt: string;
   }
-  
+
   interface AgentStatus {
     isRunning: boolean;
     currentPhase?: string;
@@ -752,23 +752,23 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
   ```
 
 ### 3.11 Frontend - API Client Updates
-- [ ] Add agent API methods:
-  - [ ] `startAgentWorkflow(taskId)` - Start agents for task
-  - [ ] `getAgentStatus(taskId)` - Get current status
-  - [ ] `cancelAgentExecution(taskId)` - Cancel execution
-  - [ ] `getAgentExecutions(taskId)` - List executions
-  - [ ] `getExecutionDetails(executionId)` - Get details
-  - [ ] `getExecutionOutputs(executionId)` - Get outputs
-  - [ ] `streamExecutionOutput(executionId)` - SSE stream
+- [x] Add agent API methods:
+  - [x] `startAgentWorkflow(taskId)` - Start agents for task
+  - [x] `getAgentStatus(taskId)` - Get current status
+  - [x] `cancelAgentExecution(taskId)` - Cancel execution
+  - [x] `getAgentExecutions(taskId)` - List executions
+  - [x] `getExecutionDetails(executionId)` - Get details
+  - [x] `getExecutionOutputs(executionId)` - Get outputs
+  - [x] `streamExecutionOutput(executionId)` - SSE stream
 
 ### 3.12 Frontend - Store Updates
-- [ ] Add agent state to store:
+- [x] Add agent state to store:
   ```typescript
   interface BoardStore {
     // ... existing state
     agentExecutions: Record<string, AgentExecution[]>; // taskId -> executions
     agentStatus: Record<string, AgentStatus>; // taskId -> status
-    
+
     // Actions
     startAgentWorkflow: (taskId: string) => Promise<void>;
     cancelAgentExecution: (taskId: string) => Promise<void>;
@@ -776,51 +776,51 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
     updateAgentStatus: (taskId: string, status: AgentStatus) => void;
   }
   ```
-- [ ] Handle WebSocket updates for agent status
-- [ ] Implement polling fallback for status
+- [x] Handle WebSocket updates for agent status
+- [x] Implement polling fallback for status
 
 ### 3.13 Frontend - Agent Status Components
-- [ ] Create `AgentStatusBadge` component:
-  - [ ] Shows current agent phase
-  - [ ] Color coded by status
-  - [ ] Animated when running
-- [ ] Create `AgentStatusIndicator` component:
-  - [ ] Circular progress indicator
-  - [ ] Phase labels
-  - [ ] Time elapsed
-- [ ] Update `TaskCard` component:
-  - [ ] Show agent status badge
-  - [ ] Click to expand details
+- [x] Create `AgentStatusBadge` component:
+  - [x] Shows current agent phase
+  - [x] Color coded by status
+  - [x] Animated when running
+- [x] Create `AgentStatusIndicator` component:
+  - [x] Circular progress indicator
+  - [x] Phase labels
+  - [x] Time elapsed
+- [x] Update `TaskCard` component:
+  - [x] Show agent status badge
+  - [x] Click to expand details
 
 ### 3.14 Frontend - Agent Execution Panel
-- [ ] Create `AgentExecutionPanel` component:
-  - [ ] Shows in task detail view
-  - [ ] List of all executions
-  - [ ] Current execution highlighted
-- [ ] Create `ExecutionDetails` component:
-  - [ ] Agent info (type, name)
-  - [ ] Status and timing
-  - [ ] Token usage and cost
-  - [ ] Output viewer
-- [ ] Create `AgentOutputViewer` component:
-  - [ ] Streaming output display
-  - [ ] Syntax highlighting for code
-  - [ ] Collapsible sections
-  - [ ] Copy to clipboard
+- [x] Create `AgentExecutionPanel` component:
+  - [x] Shows in task detail view
+  - [x] List of all executions
+  - [x] Current execution highlighted
+- [x] Create `ExecutionDetails` component:
+  - [x] Agent info (type, name)
+  - [x] Status and timing
+  - [x] Token usage and cost
+  - [x] Output viewer
+- [x] Create `AgentOutputViewer` component:
+  - [x] Streaming output display
+  - [x] Syntax highlighting for code
+  - [x] Collapsible sections
+  - [x] Copy to clipboard
 
 ### 3.15 Frontend - Agent Control UI
-- [ ] Create `AgentControlPanel` component:
-  - [ ] Start/Stop buttons
-  - [ ] Phase selector (manual override)
-  - [ ] Agent type selector
-- [ ] Add agent trigger button to task cards
-- [ ] Add agent status to column header (count of running)
+- [x] Create `AgentControlPanel` component:
+  - [x] Start/Stop buttons
+  - [x] Phase selector (manual override)
+  - [x] Agent type selector
+- [x] Add agent trigger button to task cards
+- [x] Add agent status to column header (count of running)
 
 ### 3.16 Frontend - Real-time Updates
-- [ ] Implement SSE client for output streaming
-- [ ] Update WebSocket handler for agent events
-- [ ] Add notification for agent completion
-- [ ] Add error toast for agent failures
+- [x] Implement SSE client for output streaming
+- [x] Update WebSocket handler for agent events
+- [x] Add notification for agent completion
+- [x] Add error toast for agent failures
 
 ### 3.17 Testing & Documentation
 - [ ] Write unit tests for AgentOrchestrator
@@ -1175,11 +1175,11 @@ docker exec agent-rangers-backend alembic downgrade -1
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Complete | 100% |
 | Phase 2: Workflow Engine | ✅ Complete | 100% |
-| Phase 3: Claude-Flow | 🔲 Not Started | 0% |
+| Phase 3: Claude-Flow | 🔶 In Progress | 80% |
 | Phase 4: Knowledge (RAG) | 🔲 Not Started | 0% |
 | Phase 5: Polish | 🔲 Not Started | 0% |
 
-**Overall Progress:** ~40% (Phase 1 & 2 complete)
+**Overall Progress:** ~56% (Phase 1 & 2 complete, Phase 3 at 80%)
 
 ---
 
