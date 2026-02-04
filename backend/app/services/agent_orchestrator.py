@@ -5,12 +5,10 @@ import json
 import logging
 import os
 import re
-import tempfile
 from datetime import datetime
 from typing import Optional, Callable, Any
 from uuid import UUID
 
-import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -405,10 +403,7 @@ class AgentOrchestrator:
         on_output: Optional[Callable[[str, dict], Any]] = None,
     ) -> dict:
         """
-        Execute an agent with the given context.
-
-        Attempts to use the Claude CLI with the agent's system prompt from YAML.
-        Falls back to simulated execution if Claude CLI is not available.
+        Execute an agent with the given context using claude-flow.
 
         Args:
             agent_name: Name of the agent
@@ -418,201 +413,241 @@ class AgentOrchestrator:
         Returns:
             Agent result dictionary with content, structured data, files, and token usage
         """
-        # Map phase names to agent YAML file names
         phase = context.get("phase", "unknown")
-        agent_mapping = {
-            "architecture": "software-architect",
-            "development": "software-developer",
-            "review": "code-reviewer",
+
+        # Agent type mapping for claude-flow
+        agent_type_mapping = {
+            "architecture": "coder",  # or "architect" if available
+            "development": "coder",
+            "review": "reviewer",
         }
-        cli_agent_name = agent_mapping.get(phase, agent_name)
+        agent_type = agent_type_mapping.get(phase, "coder")
 
-        # Working directory where .claude/ config exists
-        working_dir = os.environ.get("AGENT_WORKING_DIR", "/app")
-        agent_yaml_path = os.path.join(working_dir, ".claude", "agents", f"{cli_agent_name}.yml")
+        # Check if claude-flow is enabled
+        use_claude_flow = os.environ.get("USE_CLAUDE_FLOW", "false").lower() == "true"
 
-        # Load agent configuration from YAML
-        system_prompt = None
-        agent_config = {}
-        if os.path.exists(agent_yaml_path):
-            try:
-                with open(agent_yaml_path, 'r') as f:
-                    agent_config = yaml.safe_load(f)
-                    system_prompt = agent_config.get("system_prompt", "")
-                    logger.info(f"Loaded agent config from {agent_yaml_path}")
-            except Exception as e:
-                logger.warning(f"Failed to load agent YAML {agent_yaml_path}: {e}")
-        else:
-            logger.warning(f"Agent YAML not found at {agent_yaml_path}")
-
-        if on_output:
-            await on_output("progress", {
-                "agent": agent_name,
-                "phase": phase,
-                "message": f"Starting {cli_agent_name} agent...",
-            })
-
-        # Check if Claude CLI is available
-        use_claude_cli = os.environ.get("USE_CLAUDE_CLI", "false").lower() == "true"
-
-        if use_claude_cli and system_prompt:
-            # Try to execute using Claude CLI
-            result = await AgentOrchestrator._execute_with_claude_cli(
-                cli_agent_name, system_prompt, context, on_output
+        if use_claude_flow:
+            return await AgentOrchestrator._execute_with_claude_flow(
+                agent_type, agent_name, phase, context, on_output
             )
         else:
-            # Use simulated execution
-            # TODO: Enable Claude CLI execution once 'claude' binary is installed in the container
-            # To enable: set USE_CLAUDE_CLI=true and ensure 'claude' CLI is installed
-            result = await AgentOrchestrator._execute_simulated(
-                cli_agent_name, phase, context, agent_config, on_output
+            # Fallback to simulated execution
+            return await AgentOrchestrator._execute_simulated(
+                agent_name, phase, context, {}, on_output
             )
-
-        if on_output:
-            await on_output("progress", {
-                "agent": agent_name,
-                "phase": phase,
-                "message": f"Completed {cli_agent_name} agent",
-            })
-
-        return result
 
     @staticmethod
-    async def _execute_with_claude_cli(
+    async def _execute_with_claude_flow(
+        agent_type: str,
         agent_name: str,
-        system_prompt: str,
+        phase: str,
         context: dict,
         on_output: Optional[Callable[[str, dict], Any]] = None,
     ) -> dict:
         """
-        Execute an agent using the Claude CLI with --print flag.
+        Execute an agent using claude-flow CLI.
 
         Args:
-            agent_name: Name of the agent
-            system_prompt: System prompt from the agent YAML
+            agent_type: claude-flow agent type (coder, reviewer, etc.)
+            agent_name: Display name for the agent
+            phase: Workflow phase
             context: Input context
             on_output: Optional callback for streaming output
 
         Returns:
             Agent result dictionary
         """
-        phase = context.get("phase", "unknown")
-
-        # Build the combined prompt with system prompt and task context
+        # Build the task prompt
         task_prompt = AgentOrchestrator._build_task_prompt(context)
-        combined_prompt = f"{system_prompt}\n\n---\n\n## Current Task\n\n{task_prompt}"
 
-        # Create temporary file for the prompt (Claude CLI can read from stdin or file)
-        temp_prompt_file = None
+        # Generate unique agent name
+        unique_name = f"{agent_name}-{phase}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+        if on_output:
+            await on_output("progress", {
+                "agent": agent_name,
+                "phase": phase,
+                "message": f"Spawning {agent_type} agent via claude-flow...",
+            })
+
         try:
-            with tempfile.NamedTemporaryFile(
-                mode='w',
-                suffix='.txt',
-                delete=False,
-                dir='/tmp'
-            ) as f:
-                f.write(combined_prompt)
-                temp_prompt_file = f.name
+            # Step 1: Spawn the agent
+            spawn_cmd = [
+                "npx", "@claude-flow/cli@latest", "agent", "spawn",
+                "-t", agent_type,
+                "--name", unique_name,
+                "--task", task_prompt,
+                "--output", "json",
+            ]
+
+            spawn_process = await asyncio.create_subprocess_exec(
+                *spawn_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                spawn_process.communicate(),
+                timeout=60  # 1 minute timeout for spawn
+            )
+
+            if spawn_process.returncode != 0:
+                error_msg = stderr.decode('utf-8') if stderr else "Unknown error"
+                logger.error(f"claude-flow agent spawn failed: {error_msg}")
+                # Fallback to simulated
+                return await AgentOrchestrator._execute_simulated(
+                    agent_name, phase, context, {}, on_output
+                )
+
+            # Parse spawn output to get agent ID
+            spawn_output = stdout.decode('utf-8')
+            try:
+                spawn_data = json.loads(spawn_output)
+                agent_id = spawn_data.get("agent_id") or spawn_data.get("id")
+            except json.JSONDecodeError:
+                # Try to extract agent ID from text output
+                agent_id = AgentOrchestrator._extract_agent_id(spawn_output)
+
+            if not agent_id:
+                logger.error("Failed to get agent ID from spawn output")
+                return await AgentOrchestrator._execute_simulated(
+                    agent_name, phase, context, {}, on_output
+                )
 
             if on_output:
                 await on_output("progress", {
                     "agent": agent_name,
                     "phase": phase,
-                    "message": f"Executing {agent_name} with Claude CLI...",
+                    "message": f"Agent spawned with ID: {agent_id}",
                 })
 
-            # Build command: claude --print -p '<prompt>'
-            # Using --print for non-interactive mode
-            cmd = [
-                "claude",
-                "--print",
-                "-p",
-                combined_prompt[:100000],  # Truncate to avoid shell limits
+            # Step 2: Poll for completion
+            max_wait_time = 300  # 5 minutes
+            poll_interval = 5  # 5 seconds
+            elapsed = 0
+
+            while elapsed < max_wait_time:
+                status_cmd = [
+                    "npx", "@claude-flow/cli@latest", "agent", "status", agent_id
+                ]
+
+                status_process = await asyncio.create_subprocess_exec(
+                    *status_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+
+                status_stdout, _ = await asyncio.wait_for(
+                    status_process.communicate(),
+                    timeout=30
+                )
+
+                status_output = status_stdout.decode('utf-8')
+
+                # Try to parse as JSON
+                try:
+                    status_data = json.loads(status_output)
+                    agent_status = status_data.get("status", "").lower()
+                except json.JSONDecodeError:
+                    # Check for status in text output
+                    if "completed" in status_output.lower():
+                        agent_status = "completed"
+                    elif "failed" in status_output.lower():
+                        agent_status = "failed"
+                    else:
+                        agent_status = "running"
+
+                if agent_status == "completed":
+                    break
+                elif agent_status == "failed":
+                    raise Exception(f"Agent {agent_id} failed")
+
+                if on_output:
+                    await on_output("progress", {
+                        "agent": agent_name,
+                        "phase": phase,
+                        "message": f"Agent {agent_id} still running... ({elapsed}s)",
+                    })
+
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+
+            if elapsed >= max_wait_time:
+                raise Exception(f"Agent {agent_id} timed out after {max_wait_time} seconds")
+
+            # Step 3: Get final output from logs
+            logs_cmd = [
+                "npx", "@claude-flow/cli@latest", "agent", "logs", agent_id
             ]
 
-            # Execute subprocess asynchronously
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
+            logs_process = await asyncio.create_subprocess_exec(
+                *logs_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout_lines = []
-            stderr_lines = []
+            logs_stdout, _ = await asyncio.wait_for(
+                logs_process.communicate(),
+                timeout=30
+            )
 
-            async def read_stdout():
-                while True:
-                    line = await process.stdout.readline()
-                    if not line:
-                        break
-                    line_text = line.decode('utf-8').strip()
-                    stdout_lines.append(line_text)
-                    if on_output and line_text:
-                        await on_output("progress", {
-                            "agent": agent_name,
-                            "phase": phase,
-                            "message": line_text[:200],
-                        })
+            logs_output = logs_stdout.decode('utf-8')
 
-            async def read_stderr():
-                while True:
-                    line = await process.stderr.readline()
-                    if not line:
-                        break
-                    line_text = line.decode('utf-8').strip()
-                    stderr_lines.append(line_text)
-                    if line_text:
-                        logger.warning(f"Claude CLI stderr: {line_text}")
+            # Extract structured data from output
+            structured_data = AgentOrchestrator._extract_structured_output(logs_output, phase)
 
-            # Read both streams with timeout
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(read_stdout(), read_stderr()),
-                    timeout=300  # 5 minute timeout
-                )
-                await asyncio.wait_for(process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                raise Exception(f"Claude CLI execution timed out after 300 seconds")
-
-            # Check return code
-            if process.returncode != 0:
-                error_msg = "\n".join(stderr_lines) if stderr_lines else "Unknown error"
-                logger.error(f"Claude CLI failed: {error_msg}")
-                # Fall back to simulated execution
-                return await AgentOrchestrator._execute_simulated(
-                    agent_name, phase, context, {}, on_output
-                )
-
-            # Parse output
-            stdout_text = "\n".join(stdout_lines)
-
-            # Try to extract structured data from the output
-            structured_data = AgentOrchestrator._extract_structured_output(stdout_text, phase)
+            if on_output:
+                await on_output("progress", {
+                    "agent": agent_name,
+                    "phase": phase,
+                    "message": f"Agent {agent_id} completed successfully",
+                })
 
             return {
-                "content": stdout_text,
+                "content": logs_output,
                 "structured": structured_data,
                 "files": [],
                 "tokens_used": None,
             }
 
+        except asyncio.TimeoutError:
+            logger.error("claude-flow command timed out")
+            return await AgentOrchestrator._execute_simulated(
+                agent_name, phase, context, {}, on_output
+            )
         except FileNotFoundError:
-            # Claude CLI not found, fall back to simulated
-            logger.warning("Claude CLI not found, falling back to simulated execution")
+            logger.warning("npx or claude-flow CLI not found, falling back to simulated")
             return await AgentOrchestrator._execute_simulated(
                 agent_name, phase, context, {}, on_output
             )
         except Exception as e:
-            logger.error(f"Claude CLI execution failed: {e}")
-            raise
-        finally:
-            if temp_prompt_file and os.path.exists(temp_prompt_file):
-                try:
-                    os.unlink(temp_prompt_file)
-                except Exception as e:
-                    logger.warning(f"Failed to delete temp file {temp_prompt_file}: {e}")
+            logger.error(f"claude-flow execution failed: {e}")
+            return await AgentOrchestrator._execute_simulated(
+                agent_name, phase, context, {}, on_output
+            )
+
+    @staticmethod
+    def _extract_agent_id(output: str) -> Optional[str]:
+        """Extract agent ID from command output."""
+        # Try patterns with capture groups first
+        patterns_with_groups = [
+            r'"agent_id"\s*:\s*"([^"]+)"',
+            r'"id"\s*:\s*"([^"]+)"',
+            r'Agent ID:\s*(\S+)',
+            r'Spawned agent:\s*(\S+)',
+        ]
+
+        for pattern in patterns_with_groups:
+            match = re.search(pattern, output)
+            if match:
+                return match.group(1)
+
+        # Try pattern without capture group (full match)
+        match = re.search(r'agent-\w+-\d+', output)
+        if match:
+            return match.group(0)
+
+        return None
 
     @staticmethod
     async def _execute_simulated(
@@ -625,17 +660,16 @@ class AgentOrchestrator:
         """
         Simulated agent execution for development/testing.
 
-        TODO: Replace with real Claude CLI execution once available.
-        To enable real execution:
-        1. Install Claude CLI in the Docker container
-        2. Set USE_CLAUDE_CLI=true environment variable
-        3. Ensure ANTHROPIC_API_KEY is set
+        This is used as a fallback when claude-flow is not available or enabled.
+        To enable real claude-flow execution:
+        1. Install claude-flow CLI (npx @claude-flow/cli@latest)
+        2. Set USE_CLAUDE_FLOW=true environment variable
 
         Args:
             agent_name: Name of the agent
             phase: Workflow phase
             context: Input context
-            agent_config: Agent configuration from YAML
+            agent_config: Agent configuration (unused, kept for compatibility)
             on_output: Optional callback for streaming output
 
         Returns:
