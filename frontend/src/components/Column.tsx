@@ -65,9 +65,9 @@ export function Column({
   const taskIds = tasks.map((task) => task.id);
 
   return (
-    <div className="flex-shrink-0 w-80">
-      <Card className={`h-full transition-all duration-200 ${getDropZoneClass()}`}>
-        <CardHeader className="p-4">
+    <div className="flex-shrink-0 w-80 h-full">
+      <Card className={`flex flex-col h-full transition-all duration-200 ${getDropZoneClass()}`}>
+        <CardHeader className="p-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base font-semibold">
@@ -110,10 +110,10 @@ export function Column({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-4 pt-0">
+        <CardContent className="p-4 pt-0 flex-1 min-h-0 overflow-y-auto">
           <div
             ref={setNodeRef}
-            className="min-h-[200px] space-y-2"
+            className={`space-y-2 ${tasks.length === 0 ? 'min-h-[200px] h-full' : ''}`}
           >
             <SortableContext
               items={taskIds}
@@ -124,7 +124,7 @@ export function Column({
               ))}
             </SortableContext>
             {tasks.length === 0 && (
-              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground border-2 border-dashed rounded-lg">
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground border-2 border-dashed rounded-lg">
                 Drop tasks here or click + to add
               </div>
             )}

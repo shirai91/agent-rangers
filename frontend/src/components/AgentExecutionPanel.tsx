@@ -38,7 +38,9 @@ export function AgentExecutionPanel({
   const [selectedExecution, setSelectedExecution] = useState<AgentExecution | null>(null);
   const [startingWorkflow, setStartingWorkflow] = useState(false);
 
+  // Reset selected execution and fetch new data when taskId changes
   useEffect(() => {
+    setSelectedExecution(null);
     if (taskId) {
       fetchTaskExecutions(taskId);
     }
@@ -110,6 +112,24 @@ export function AgentExecutionPanel({
     });
   };
 
+  const getWorkflowLabel = (workflowType: string) => {
+    const labels: Record<string, string> = {
+      development: 'Full Coding',
+      quick_development: 'Quick Coding',
+      architecture_only: 'Plan Only',
+    };
+    return labels[workflowType] || workflowType;
+  };
+
+  const getPhaseLabel = (phase: string) => {
+    const labels: Record<string, string> = {
+      architecture: 'Planning',
+      development: 'Coding',
+      review: 'Review',
+    };
+    return labels[phase] || phase;
+  };
+
   const runningExecution = executions.find((e) => e.status === 'running');
 
   return (
@@ -162,7 +182,7 @@ export function AgentExecutionPanel({
                   className="flex flex-col items-center gap-1 h-auto py-3"
                 >
                   <Box className="h-4 w-4" />
-                  <span className="text-xs">Architecture</span>
+                  <span className="text-xs">Plan Only</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -172,7 +192,7 @@ export function AgentExecutionPanel({
                   className="flex flex-col items-center gap-1 h-auto py-3"
                 >
                   <Zap className="h-4 w-4" />
-                  <span className="text-xs">Quick Dev</span>
+                  <span className="text-xs">Quick Coding</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -182,7 +202,7 @@ export function AgentExecutionPanel({
                   className="flex flex-col items-center gap-1 h-auto py-3"
                 >
                   <Workflow className="h-4 w-4" />
-                  <span className="text-xs">Full Dev</span>
+                  <span className="text-xs">Full Coding</span>
                 </Button>
               </div>
             )}
@@ -222,7 +242,7 @@ export function AgentExecutionPanel({
                           {getStatusIcon(execution.status)}
                           <div>
                             <div className="text-sm font-medium">
-                              {execution.workflow_type.replace(/_/g, ' ')}
+                              {getWorkflowLabel(execution.workflow_type)}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {formatDateTime(execution.started_at)}
@@ -232,7 +252,7 @@ export function AgentExecutionPanel({
                         <div className="flex items-center gap-2">
                           {execution.current_phase && (
                             <Badge variant="secondary" className="text-xs">
-                              {execution.current_phase}
+                              {getPhaseLabel(execution.current_phase)}
                             </Badge>
                           )}
                         </div>

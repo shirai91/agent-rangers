@@ -249,8 +249,8 @@ function BoardView() {
             </div>
           </div>
         </header>
-        <main className="container mx-auto">
-          <div className="flex flex-col h-[calc(100vh-80px)]">
+        <main className="container mx-auto h-[calc(100vh-80px)]">
+          <div className="flex flex-col h-full overflow-hidden">
             <div className="border-b px-6 py-4">
               <Skeleton className="h-8 w-48" />
               <Skeleton className="h-4 w-72 mt-2" />
@@ -296,8 +296,8 @@ function BoardView() {
         </div>
       </header>
 
-      <main className="container mx-auto">
-        <div className="flex flex-col h-[calc(100vh-80px)]">
+      <main className="container mx-auto h-[calc(100vh-80px)]">
+        <div className="flex flex-col h-full overflow-hidden">
           <div className="border-b px-6 py-4 flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold">{currentBoard.name}</h2>

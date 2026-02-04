@@ -120,6 +120,15 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
     }
   };
 
+  const getPhaseLabel = (phase: string) => {
+    const labels: Record<string, string> = {
+      architecture: 'Planning',
+      development: 'Coding',
+      review: 'Review',
+    };
+    return labels[phase] || phase;
+  };
+
   const formatDuration = (ms: number | null) => {
     if (!ms) return 'N/A';
     if (ms < 1000) return `${ms}ms`;
@@ -219,7 +228,7 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
               <Cpu className="h-4 w-4 text-muted-foreground" />
               {output.agent_name}
               <Badge variant="outline" className="text-xs font-normal">
-                {output.phase}
+                {getPhaseLabel(output.phase)}
               </Badge>
               {output.iteration > 1 && (
                 <Badge variant="secondary" className="text-xs font-normal">

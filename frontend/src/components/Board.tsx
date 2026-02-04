@@ -164,7 +164,7 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, 
   };
 
   return (
-    <div className="flex-1 overflow-x-auto overflow-y-hidden">
+    <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0">
       <div className="flex gap-4 p-6 h-full">
         <DndContext
           sensors={sensors}

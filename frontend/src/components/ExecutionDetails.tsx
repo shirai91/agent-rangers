@@ -65,9 +65,9 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
 
   const getWorkflowTypeBadge = () => {
     const typeMap: Record<string, { label: string; className: string }> = {
-      development: { label: 'Full Development', className: 'bg-blue-600 text-white' },
-      quick_development: { label: 'Quick Dev', className: 'bg-purple-600 text-white' },
-      architecture_only: { label: 'Architecture', className: 'bg-orange-600 text-white' },
+      development: { label: 'Full Coding', className: 'bg-blue-600 text-white' },
+      quick_development: { label: 'Quick Coding', className: 'bg-purple-600 text-white' },
+      architecture_only: { label: 'Plan Only', className: 'bg-orange-600 text-white' },
     };
 
     const config = typeMap[execution.workflow_type] || {
@@ -92,6 +92,15 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const getPhaseLabel = (phase: string) => {
+    const labels: Record<string, string> = {
+      architecture: 'Planning',
+      development: 'Coding',
+      review: 'Review',
+    };
+    return labels[phase] || phase;
   };
 
   const calculateDuration = () => {
@@ -174,7 +183,7 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
             </div>
             {execution.current_phase && (
               <div className="text-xs text-muted-foreground mt-1">
-                Current phase: {execution.current_phase}
+                Current phase: {getPhaseLabel(execution.current_phase)}
               </div>
             )}
           </div>

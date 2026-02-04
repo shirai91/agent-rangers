@@ -21,9 +21,9 @@ import type { AgentStatus } from '@/types';
 type WorkflowType = 'development' | 'quick_development' | 'architecture_only';
 
 const workflowLabels: Record<WorkflowType, string> = {
-  development: 'Start Development Workflow',
-  quick_development: 'Quick Development',
-  architecture_only: 'Architecture Only',
+  development: 'Start Full Coding',
+  quick_development: 'Quick Coding',
+  architecture_only: 'Plan Only',
 };
 
 interface AgentControlPanelProps {
@@ -82,21 +82,21 @@ export function AgentControlPanel({
           disabled={!canStartWorkflow}
         >
           <Play className="mr-2 h-4 w-4" />
-          Start Development Workflow
+          Start Full Coding
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => handleWorkflowClick('quick_development')}
           disabled={!canStartWorkflow}
         >
           <Code className="mr-2 h-4 w-4" />
-          Quick Development
+          Quick Coding
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => handleWorkflowClick('architecture_only')}
           disabled={!canStartWorkflow}
         >
           <FileCode className="mr-2 h-4 w-4" />
-          Architecture Only
+          Plan Only
         </DropdownMenuItem>
         {isRunning && onCancelExecution && (
           <>

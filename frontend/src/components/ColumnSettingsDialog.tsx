@@ -192,9 +192,9 @@ export function ColumnSettingsDialog({
                     onChange={(e) => setAgentWorkflowType(e.target.value)}
                     className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
                   >
-                    <option value="development">Development (Architect → Developer → Reviewer)</option>
-                    <option value="quick_development">Quick Development (Developer → Reviewer)</option>
-                    <option value="architecture_only">Architecture Only</option>
+                    <option value="development">Full Coding (Plan → Code → Review)</option>
+                    <option value="quick_development">Quick Coding (Code → Review)</option>
+                    <option value="architecture_only">Plan Only</option>
                   </select>
                   <p className="text-xs text-muted-foreground">
                     Select which AI workflow runs when tasks enter this column

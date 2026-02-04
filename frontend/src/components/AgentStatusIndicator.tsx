@@ -54,14 +54,23 @@ export function AgentStatusIndicator({
   const getPhaseLabel = (phase: AgentPhase) => {
     switch (phase) {
       case 'architecture':
-        return 'Architecture';
+        return 'Planning';
       case 'development':
-        return 'Development';
+        return 'Coding';
       case 'review':
         return 'Review';
       default:
         return phase;
     }
+  };
+
+  const getWorkflowLabel = (workflowType: string) => {
+    const labels: Record<string, string> = {
+      development: 'Full Coding',
+      quick_development: 'Quick Coding',
+      architecture_only: 'Plan Only',
+    };
+    return labels[workflowType] || workflowType;
   };
 
   const getCurrentAgent = () => {
@@ -164,7 +173,7 @@ export function AgentStatusIndicator({
         <div className="flex items-center justify-between pt-2 border-t">
           <p className="text-xs font-medium text-muted-foreground">Workflow</p>
           <Badge variant="secondary" className="text-xs">
-            {execution.workflow_type.replace(/_/g, ' ')}
+            {getWorkflowLabel(execution.workflow_type)}
           </Badge>
         </div>
       </CardContent>
