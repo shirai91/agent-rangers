@@ -1,9 +1,14 @@
 """Hybrid Agent Orchestrator for managing Claude agent execution.
 
 This module implements a hybrid approach combining:
-- Direct Anthropic API for planning (architect) and review phases
+- Provider Abstraction Layer for flexible AI backend selection
+- Direct API calls for planning (architect) and review phases
 - Claude CLI spawning for autonomous development work
-- Text Editor Tool for applying targeted fixes
+
+Supported providers:
+- OAuth (Claude Code CLI) - Uses Max subscription, FREE!
+- API (Anthropic) - Pay-as-you-go
+- Local (Ollama) - Completely free, self-hosted
 
 The orchestrator manages the full architect → developer → reviewer pipeline
 with support for feedback loops and real-time streaming.
@@ -38,6 +43,7 @@ from app.services.prompts import (
     build_developer_prompt,
     build_reviewer_prompt,
 )
+from app.providers import ProviderFactory, Message, Role
 
 logger = logging.getLogger(__name__)
 
@@ -47,32 +53,88 @@ WORKSPACE_BASE = Path(os.environ.get("WORKSPACE_BASE", "/tmp/workspaces"))
 
 class HybridOrchestrator:
     """
-    Hybrid agent orchestrator combining API calls and CLI execution.
+    Hybrid agent orchestrator combining Provider Abstraction Layer with CLI execution.
 
     Execution Modes:
-    - Architecture Phase: Direct Anthropic API (fast, controlled)
+    - Architecture Phase: Provider (OAuth/API/Local)
     - Development Phase: Claude CLI with file tools (autonomous)
-    - Review Phase: Direct Anthropic API + Text Editor (targeted fixes)
+    - Review Phase: Provider (OAuth/API/Local)
+    
+    Provider Types:
+    - oauth (claude-code): Uses Claude Max subscription - FREE!
+    - api (anthropic): Pay-as-you-go API
+    - local (ollama): Self-hosted, completely free
     """
 
     def __init__(self):
-        """Initialize the hybrid orchestrator."""
-        self._anthropic_client = None
+        """Initialize the hybrid orchestrator with provider support."""
+        self._providers = {}
         self._redis_client = None
+        self._providers_config = settings.get_providers_config()
+        
+        logger.info(f"Orchestrator initialized with provider mode: {settings.AI_PROVIDER_MODE}")
+
+    def _get_provider(self, role: str = "default"):
+        """Get or create a provider for the given role."""
+        if role not in self._providers:
+            self._providers[role] = ProviderFactory.create_for_role(
+                role, self._providers_config
+            )
+            logger.info(f"Created provider for {role}: {self._providers[role]}")
+        return self._providers[role]
+
+    def _has_oauth_credentials(self) -> bool:
+        """Check if OAuth credentials exist in Claude CLI config."""
+        return settings._has_oauth()
+
+    def _should_use_cli_for_all_phases(self) -> bool:
+        """Determine if CLI should be used for all phases."""
+        # Check if using OAuth provider mode
+        provider_mode = settings.AI_PROVIDER_MODE.lower()
+        
+        if provider_mode == "oauth":
+            return True
+        elif provider_mode == "api":
+            return False
+        elif provider_mode == "local":
+            return False
+        else:  # auto
+            # Use CLI if OAuth is available (it's free with Max!)
+            if self._has_oauth_credentials():
+                logger.info("OAuth credentials found - using Claude CLI for all phases (FREE with Max!)")
+                return True
+            return False
 
     @property
     def anthropic_client(self):
-        """Lazy-load Anthropic client."""
+        """Lazy-load Anthropic client (API key auth only)."""
         if self._anthropic_client is None:
             try:
                 from anthropic import Anthropic
+                
                 api_key = settings.ANTHROPIC_API_KEY
+                
                 if api_key:
+                    logger.info("Using Anthropic API key authentication")
                     self._anthropic_client = Anthropic(api_key=api_key)
                 else:
-                    logger.warning("ANTHROPIC_API_KEY not set, API calls will fail")
+                    # No API key - check if we should use CLI instead
+                    if self._has_oauth_credentials():
+                        logger.info(
+                            "No API key set but OAuth credentials found. "
+                            "Will use Claude CLI for API calls."
+                        )
+                    else:
+                        logger.warning(
+                            "No Anthropic API key set and no OAuth credentials. "
+                            "API calls will use simulated responses."
+                        )
+                    
             except ImportError:
                 logger.warning("anthropic package not installed")
+            except Exception as e:
+                logger.error(f"Failed to initialize Anthropic client: {e}")
+                
         return self._anthropic_client
 
     @property
@@ -585,66 +647,155 @@ class HybridOrchestrator:
         phase: str = "unknown",
     ) -> dict:
         """
-        Make a direct Anthropic API call.
+        Make an AI provider call using the Provider Abstraction Layer.
 
         Args:
             system_prompt: System prompt for the agent
             user_prompt: User message/prompt
             on_output: Optional callback for progress
-            phase: Phase name for logging
+            phase: Phase name for logging (also used to select provider)
 
         Returns:
             Result dictionary with content and token usage
         """
+        # Map phase to provider role
+        role_map = {
+            "architecture": "architect",
+            "development": "developer", 
+            "review": "reviewer",
+        }
+        role = role_map.get(phase, "default")
+        
         if on_output:
             await on_output("progress", {
                 "phase": phase,
-                "message": f"Starting {phase} phase via API...",
+                "message": f"Starting {phase} phase...",
             })
 
-        # Check if API is available
-        if not self.anthropic_client:
-            logger.warning("Anthropic client not available, using simulated response")
-            return await self._simulated_api_call(system_prompt, user_prompt, phase)
-
         try:
-            # Make streaming API call
-            content_parts = []
-            tokens_used = {"input": 0, "output": 0}
-
-            with self.anthropic_client.messages.stream(
-                model=settings.ANTHROPIC_MODEL,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            ) as stream:
-                for text in stream.text_stream:
-                    content_parts.append(text)
-                    if on_output:
-                        await on_output("chunk", {"text": text, "phase": phase})
-
-                # Get final message for token usage
-                final_message = stream.get_final_message()
-                tokens_used["input"] = final_message.usage.input_tokens
-                tokens_used["output"] = final_message.usage.output_tokens
-
-            content = "".join(content_parts)
+            # Get provider for this role
+            provider = self._get_provider(role)
+            logger.info(f"Using provider {provider.provider_type} for {phase} phase")
+            
+            # Check provider health
+            if not await provider.health_check():
+                logger.warning(f"Provider {provider.provider_type} health check failed, using simulated")
+                return await self._simulated_api_call(system_prompt, user_prompt, phase)
+            
+            # Make the call using provider abstraction
+            messages = [Message(role=Role.USER, content=user_prompt)]
+            
+            if provider.supports_streaming:
+                # Stream response
+                content_parts = []
+                tokens_used = {"input": 0, "output": 0}
+                
+                async for event in provider.stream(messages, system=system_prompt):
+                    if event.type == "text_delta" and event.content:
+                        content_parts.append(event.content)
+                        if on_output:
+                            await on_output("chunk", {"text": event.content, "phase": phase})
+                    elif event.type == "input_tokens":
+                        tokens_used["input"] = event.tokens or 0
+                    elif event.type == "output_tokens":
+                        tokens_used["output"] = event.tokens or 0
+                    elif event.type == "error":
+                        raise RuntimeError(event.error)
+                
+                content = "".join(content_parts)
+            else:
+                # Non-streaming call
+                response = await provider.complete(messages, system=system_prompt)
+                content = response.content
+                tokens_used = {
+                    "input": response.input_tokens or 0,
+                    "output": response.output_tokens or 0,
+                }
 
             if on_output:
                 await on_output("progress", {
                     "phase": phase,
                     "message": f"{phase.capitalize()} phase completed",
                     "tokens": tokens_used,
+                    "provider": provider.provider_type,
+                })
+
+            total_tokens = tokens_used["input"] + tokens_used["output"]
+            return {
+                "content": content,
+                "tokens_used": total_tokens if total_tokens > 0 else None,
+            }
+
+        except Exception as e:
+            logger.error(f"Provider call failed: {e}")
+            return await self._simulated_api_call(system_prompt, user_prompt, phase)
+
+    async def _cli_api_call(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+        phase: str = "unknown",
+    ) -> dict:
+        """
+        Make API-like call using Claude CLI.
+        
+        Used when OAuth is available but no API key.
+        """
+        if on_output:
+            await on_output("progress", {
+                "phase": phase,
+                "message": f"Starting {phase} phase via CLI (OAuth mode)...",
+            })
+
+        # Combine system and user prompts for CLI
+        combined_prompt = f"{system_prompt}\n\n---\n\n{user_prompt}"
+        
+        try:
+            # Use claude CLI with --print flag for non-interactive output
+            process = await asyncio.create_subprocess_exec(
+                "claude",
+                "--dangerously-skip-permissions",
+                "-p", combined_prompt,
+                "--output-format", "text",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={
+                    **os.environ,
+                    "CLAUDE_CONFIG_DIR": settings.CLAUDE_CONFIG_DIR,
+                },
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=180  # 3 minute timeout
+            )
+
+            if process.returncode != 0:
+                logger.error(f"Claude CLI failed: {stderr.decode()}")
+                return await self._simulated_api_call(system_prompt, user_prompt, phase)
+
+            content = stdout.decode().strip()
+            
+            if on_output:
+                await on_output("progress", {
+                    "phase": phase,
+                    "message": f"{phase.capitalize()} phase completed via CLI",
                 })
 
             return {
                 "content": content,
-                "tokens_used": tokens_used["input"] + tokens_used["output"],
+                "tokens_used": None,  # CLI doesn't report token usage
             }
 
+        except asyncio.TimeoutError:
+            logger.error("Claude CLI timed out")
+            return await self._simulated_api_call(system_prompt, user_prompt, phase)
+        except FileNotFoundError:
+            logger.warning("Claude CLI not found")
+            return await self._simulated_api_call(system_prompt, user_prompt, phase)
         except Exception as e:
-            logger.error(f"API call failed: {e}")
-            # Fall back to simulated
+            logger.error(f"CLI API call failed: {e}")
             return await self._simulated_api_call(system_prompt, user_prompt, phase)
 
     async def _cli_execute(

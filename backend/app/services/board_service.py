@@ -1,5 +1,7 @@
 """Business logic for board, column, and task operations."""
 
+import asyncio
+import logging
 from typing import Optional, List
 from uuid import UUID
 
@@ -16,7 +18,53 @@ from app.schemas.column import ColumnCreate, ColumnUpdate
 from app.schemas.task import TaskCreate, TaskUpdate, TaskMove
 from app.services.workflow_service import WorkflowService
 from app.services.activity_service import ActivityService
-from app.services.agent_orchestrator import AgentOrchestrator
+from app.models.agent_execution import AgentExecution
+from app.services.agent_orchestrator import AgentOrchestrator, HybridOrchestrator
+from app.database import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+async def _run_workflow_background(execution_id: UUID):
+    """
+    Run workflow in background task with its own database session.
+
+    This ensures the workflow execution doesn't block the API response
+    and handles its own database connections.
+    """
+    # Wait briefly for the main transaction to commit
+    await asyncio.sleep(0.5)
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            # Re-fetch execution in new session
+            execution = await db.get(
+                AgentExecution,
+                execution_id,
+                options=[selectinload(AgentExecution.task)],
+            )
+            if not execution:
+                logger.error(f"Execution {execution_id} not found for background task")
+                return
+
+            # Run the workflow
+            orchestrator = HybridOrchestrator()
+            await orchestrator.execute_workflow(db, execution)
+            await db.commit()
+
+        except Exception as e:
+            logger.error(f"Background workflow failed for {execution_id}: {e}", exc_info=True)
+            await db.rollback()
+
+            # Try to mark execution as failed
+            try:
+                execution = await db.get(AgentExecution, execution_id)
+                if execution and execution.status == "running":
+                    execution.status = "failed"
+                    execution.error_message = str(e)
+                    await db.commit()
+            except Exception:
+                pass
 
 
 class BoardService:
@@ -553,6 +601,9 @@ class BoardService:
                 "triggered_by": "column_transition",
             },
         )
+
+        # Start the workflow in background (this is the key missing piece!)
+        asyncio.create_task(_run_workflow_background(execution.id))
 
     @staticmethod
     async def delete_task(db: AsyncSession, task_id: UUID) -> bool:

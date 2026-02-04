@@ -14,8 +14,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install claude-flow CLI globally
-RUN npm install -g @claude-flow/cli@latest
+# Install Claude CLI and claude-flow CLI globally
+RUN npm install -g @anthropic-ai/claude-code@latest @claude-flow/cli@latest
 
 # Copy requirements first for better caching
 COPY requirements.txt .

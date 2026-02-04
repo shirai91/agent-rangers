@@ -1,15 +1,55 @@
 """Main FastAPI application for Agent Rangers."""
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import update, and_
 
 from app.config import settings
-from app.database import init_db, close_db
+from app.database import init_db, close_db, AsyncSessionLocal
 from app.api import api_router
 from app.api.websocket import manager, router as ws_router
+from app.models.agent_execution import AgentExecution
+
+
+async def cleanup_stale_executions():
+    """
+    Clean up stale agent executions that were left running from previous server instances.
+    
+    Marks executions as 'failed' if they've been running for more than 1 hour,
+    which indicates the backend was restarted while they were in progress.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            stale_threshold = datetime.utcnow() - timedelta(hours=1)
+            
+            result = await db.execute(
+                update(AgentExecution)
+                .where(
+                    and_(
+                        AgentExecution.status == "running",
+                        AgentExecution.started_at < stale_threshold
+                    )
+                )
+                .values(
+                    status="failed",
+                    error_message="Execution timed out - backend was restarted while execution was in progress",
+                    completed_at=datetime.utcnow()
+                )
+            )
+            
+            await db.commit()
+            
+            if result.rowcount > 0:
+                print(f"Cleaned up {result.rowcount} stale agent execution(s)")
+            else:
+                print("No stale agent executions found")
+                
+    except Exception as e:
+        print(f"Warning: Failed to cleanup stale executions: {e}")
 
 
 @asynccontextmanager
@@ -24,6 +64,9 @@ async def lifespan(app: FastAPI):
     if settings.DEBUG:
         print("Debug mode enabled - initializing database tables...")
         # await init_db()  # Uncomment for development without Alembic
+
+    # Clean up stale executions from previous server instances
+    await cleanup_stale_executions()
 
     # Initialize WebSocket manager Redis connection
     await manager.initialize_redis()

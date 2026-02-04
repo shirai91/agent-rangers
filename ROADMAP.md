@@ -1106,19 +1106,32 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 ## Quick Reference
 
 ### Running the Project
+
+**Infrastructure:** Database in Docker, Backend/Frontend on host machine.
+
 ```bash
 cd ~/projects/personal/agent-rangers
+
+# 1. Start database services (PostgreSQL + Redis)
 docker compose up -d
 
-# Rebuild after changes
-docker compose up -d --build
+# 2. Start backend (in separate terminal)
+cd backend
+source venv/bin/activate  # or create: python -m venv venv && pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# View logs
-docker compose logs -f backend
-docker compose logs -f frontend
+# 3. Start frontend (in separate terminal)
+cd frontend
+npm install  # first time only
+npm run dev -- --host
+```
 
-# Stop
+**Stop services:**
+```bash
+# Stop database
 docker compose down
+
+# Backend/Frontend: Ctrl+C in their terminals
 ```
 
 ### URLs
@@ -1128,6 +1141,8 @@ docker compose down
 | Backend API | http://192.168.1.225:8000 |
 | API Docs | http://192.168.1.225:8000/docs |
 | Health Check | http://192.168.1.225:8000/health |
+| PostgreSQL | localhost:5432 |
+| Redis | localhost:6380 |
 
 ### Project Structure
 ```
@@ -1139,6 +1154,7 @@ agent-rangers/
 │   │   ├── schemas/       # Pydantic schemas
 │   │   └── services/      # Business logic
 │   ├── alembic/           # Database migrations
+│   ├── .env               # Local environment config
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
@@ -1151,20 +1167,23 @@ agent-rangers/
 │   └── agents/            # Agent definitions
 ├── docs/
 │   └── ARCHITECTURE.md    # Full architecture doc
-├── docker-compose.yml
+├── docker-compose.yml     # Database services only
 └── ROADMAP.md             # This file
 ```
 
 ### Database Migrations
 ```bash
+cd ~/projects/personal/agent-rangers/backend
+source venv/bin/activate
+
 # Create new migration
-docker exec agent-rangers-backend alembic revision --autogenerate -m "description"
+alembic revision --autogenerate -m "description"
 
 # Run migrations
-docker exec agent-rangers-backend alembic upgrade head
+alembic upgrade head
 
 # Rollback
-docker exec agent-rangers-backend alembic downgrade -1
+alembic downgrade -1
 ```
 
 ---

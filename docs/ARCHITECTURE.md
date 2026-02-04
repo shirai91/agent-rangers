@@ -27,10 +27,8 @@ This approach provides the best balance of control, performance, and capability 
 4. [Agent Definitions & Workflows](#agent-definitions--workflows)
 5. [Activity Logging & Real-Time Updates](#activity-logging--real-time-updates)
 6. [Database Schema](#database-schema)
-7. [Frontend Architecture](#frontend-architecture)
-8. [API Design](#api-design)
-9. [Implementation Roadmap](#implementation-roadmap)
-10. [Key Challenges & Solutions](#key-challenges--solutions)
+7. [Implementation Roadmap](#implementation-roadmap)
+8. [Key Challenges & Solutions](#key-challenges--solutions)
 
 ---
 
@@ -151,7 +149,47 @@ The core orchestration service (`backend/app/services/hybrid_orchestrator.py`) c
 2. **Claude Agent SDK** - Used for Developer phase (autonomous file operations)
 3. **Text Editor Tool** - Used for applying critical fixes from review
 
-See the full implementation in the source code.
+```python
+# backend/app/services/hybrid_orchestrator.py
+
+from anthropic import Anthropic
+from claude_agent_sdk import Agent
+
+class HybridOrchestrator:
+    """Hybrid agent orchestration without external frameworks."""
+
+    def __init__(self):
+        self.client = Anthropic()
+
+    async def execute_workflow(self, task_id: str, description: str, workspace: str):
+        """Execute full architect → developer → reviewer workflow."""
+
+        # Phase 1: Architecture (Direct API)
+        arch_result = await self._api_call(
+            role="architect",
+            system_prompt=ARCHITECT_PROMPT,
+            prompt=f"Design architecture for: {description}"
+        )
+        await self._save_output(workspace, "ARCHITECTURE.md", arch_result)
+
+        # Phase 2: Development (CLI Spawning)
+        await self._cli_execute(
+            task_id=task_id,
+            workspace=workspace,
+            prompt=f"Implement based on architecture:\n{arch_result}",
+            role="developer"
+        )
+
+        # Phase 3: Review (Direct API + Text Editor)
+        review_result = await self._api_call(
+            role="reviewer",
+            system_prompt=REVIEWER_PROMPT,
+            prompt=f"Review the implementation in {workspace}"
+        )
+        await self._apply_review_fixes(task_id, workspace, review_result)
+
+        return {"status": "complete", "workspace": workspace}
+```
 
 ---
 

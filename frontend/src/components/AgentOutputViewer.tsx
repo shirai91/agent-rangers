@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   ChevronDown,
   ChevronRight,
@@ -9,16 +16,77 @@ import {
   Clock,
   FileCode,
   Cpu,
+  Eye,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react';
 import type { AgentOutput } from '@/types';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 interface AgentOutputViewerProps {
   output: AgentOutput;
 }
 
 export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
+  const [showContent, setShowContent] = useState(false);
   const [showStructured, setShowStructured] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  // Extract task_id from file path (format: /tmp/workspaces/{task_id}/...)
+  const extractTaskId = (filePath: string): string | null => {
+    const match = filePath.match(/\/tmp\/workspaces\/([^\/]+)/);
+    return match ? match[1] : null;
+  };
+
+  // Extract relative path from full path
+  const extractRelativePath = (filePath: string): string => {
+    const match = filePath.match(/\/tmp\/workspaces\/[^\/]+\/(.+)/);
+    return match ? match[1] : filePath;
+  };
+
+  // Load file content
+  const loadFileContent = async (filePath: string) => {
+    const taskId = extractTaskId(filePath);
+    const relativePath = extractRelativePath(filePath);
+    
+    if (!taskId) {
+      setFileError('Could not extract task ID from file path');
+      return;
+    }
+
+    setFileLoading(true);
+    setFileError(null);
+    setViewingFile(filePath);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/agents/workspaces/${taskId}/files/${relativePath}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Failed to load file: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      setFileContent(data.content);
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : 'Failed to load file');
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  // Get raw file URL for direct viewing in browser
+  const getRawFileUrl = (filePath: string): string => {
+    const taskId = extractTaskId(filePath);
+    const relativePath = extractRelativePath(filePath);
+    return `${API_URL}/api/agents/workspaces/${taskId}/raw/${relativePath}`;
+  };
 
   const getStatusBadge = () => {
     switch (output.status) {
@@ -188,12 +256,34 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
           </div>
         )}
 
-        {/* Output content */}
+        {/* Output content - collapsible, hidden by default */}
         {output.output_content && (
-          <div className="prose prose-sm max-w-none">
-            <div className="text-sm text-foreground whitespace-pre-wrap">
-              {renderMarkdown(output.output_content)}
-            </div>
+          <div className="border rounded-md">
+            <button
+              onClick={() => setShowContent(!showContent)}
+              className="w-full px-3 py-2 flex items-center justify-between hover:bg-muted/50 transition-colors"
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {showContent ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                Output Content
+              </div>
+              <Badge variant="secondary" className="text-xs">
+                {output.output_content.length} chars
+              </Badge>
+            </button>
+            {showContent && (
+              <div className="px-3 pb-3 pt-1">
+                <div className="prose prose-sm max-w-none">
+                  <div className="text-sm text-foreground whitespace-pre-wrap">
+                    {renderMarkdown(output.output_content)}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -251,19 +341,114 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
             {showFiles && (
               <div className="px-3 pb-3 pt-1">
                 <div className="space-y-2">
-                  {output.files_created.map((file, index) => (
-                    <div
-                      key={index}
-                      className="p-2 bg-muted rounded-md text-xs font-mono"
-                    >
-                      {typeof file === 'string' ? file : JSON.stringify(file)}
-                    </div>
-                  ))}
+                  {output.files_created.map((file, index) => {
+                    const filePath = typeof file === 'string' ? file : JSON.stringify(file);
+                    const fileName = filePath.split('/').pop() || filePath;
+                    
+                    return (
+                      <div
+                        key={index}
+                        className="p-2 bg-muted rounded-md flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <FileCode className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <span className="text-xs font-mono truncate" title={filePath}>
+                            {fileName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => loadFileContent(filePath)}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            asChild
+                          >
+                            <a
+                              href={getRawFileUrl(filePath)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Raw
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
           </div>
         )}
+
+        {/* File Viewer Dialog */}
+        <Dialog open={viewingFile !== null} onOpenChange={() => {
+          setViewingFile(null);
+          setFileContent(null);
+          setFileError(null);
+        }}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileCode className="h-5 w-5" />
+                {viewingFile?.split('/').pop()}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto">
+              {fileLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-muted-foreground">Loading file...</span>
+                </div>
+              )}
+              {fileError && (
+                <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-md">
+                  <div className="flex items-center gap-2 text-destructive">
+                    <XCircle className="h-4 w-4" />
+                    {fileError}
+                  </div>
+                </div>
+              )}
+              {fileContent && !fileLoading && (
+                <div className="bg-muted rounded-md overflow-hidden">
+                  <div className="px-4 py-2 bg-muted-foreground/10 text-xs font-mono text-muted-foreground border-b flex items-center justify-between">
+                    <span>{viewingFile?.split('/').pop()}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      asChild
+                    >
+                      <a
+                        href={viewingFile ? getRawFileUrl(viewingFile) : '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="h-3 w-3 mr-1" />
+                        Open in new tab
+                      </a>
+                    </Button>
+                  </div>
+                  <pre className="p-4 overflow-auto max-h-[60vh]">
+                    <code className="text-sm font-mono whitespace-pre-wrap">
+                      {fileContent}
+                    </code>
+                  </pre>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

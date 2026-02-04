@@ -116,45 +116,90 @@ backend/
 Copy `.env.example` to `.env` and configure:
 
 ```env
+# Database (Docker container on localhost)
 DATABASE_URL=postgresql+asyncpg://agent_rangers:agent_rangers_dev@localhost:5432/agent_rangers
-REDIS_URL=redis://localhost:6379
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+
+# Redis (Docker container - mapped to port 6380)
+REDIS_URL=redis://localhost:6380
+
+# CORS origins for frontend
+CORS_ORIGINS=http://localhost:5173,http://192.168.1.225:5173
+
+# API Settings
 API_V1_PREFIX=/api
 PROJECT_NAME=Agent Rangers API
 DEBUG=True
+
+# AI Provider (oauth uses Claude Max subscription)
+AI_PROVIDER_MODE=oauth
 ```
 
 ## Development Setup
 
-### Using Docker Compose (Recommended)
+**Infrastructure:** Database services (PostgreSQL + Redis) run in Docker, backend runs on host machine.
+
+### 1. Start Database Services
 
 ```bash
-# Start all services (backend, PostgreSQL, Redis)
+cd ~/projects/personal/agent-rangers
+
+# Start PostgreSQL and Redis in Docker
 docker compose up -d
 
-# View logs
-docker compose logs -f backend
-
-# Stop services
-docker compose down
+# Verify services are running
+docker compose ps
 ```
 
-The backend will be available at `http://localhost:8000`
-
-### Local Development
+### 2. Setup Python Environment
 
 ```bash
+cd backend
+
+# Create virtual environment (first time only)
+python -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # Linux/Mac
+# or: venv\Scripts\activate  # Windows
+
 # Install dependencies
 pip install -r requirements.txt
+```
 
-# Run PostgreSQL and Redis
-docker compose up -d postgres redis
+### 3. Configure Environment
 
-# Run Alembic migrations
+```bash
+# Copy example config (first time only)
+cp .env.example .env
+
+# Edit .env if needed - defaults work for local development
+# Note: Redis is on port 6380 (Docker maps 6379→6380)
+```
+
+### 4. Run Migrations
+
+```bash
+# Apply database migrations
 alembic upgrade head
+```
 
-# Start the development server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+### 5. Start the Backend
+
+```bash
+# Development server with auto-reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The backend will be available at `http://192.168.1.225:8000`
+
+### Stop Services
+
+```bash
+# Stop backend: Ctrl+C in terminal
+
+# Stop database services
+cd ~/projects/personal/agent-rangers
+docker compose down
 ```
 
 ## Database Migrations

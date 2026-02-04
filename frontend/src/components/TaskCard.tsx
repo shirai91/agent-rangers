@@ -111,7 +111,7 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
   };
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // Don't trigger edit if clicking on buttons, dropdowns, or grip handle
+    // Don't trigger if clicking on buttons, dropdowns, or grip handle
     const target = e.target as HTMLElement;
     if (
       target.closest('button') ||
@@ -120,7 +120,8 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
     ) {
       return;
     }
-    onEdit(task);
+    // Open execution history panel on card click
+    setShowExecutionPanel(true);
   };
 
   return (

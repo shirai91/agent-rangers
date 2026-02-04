@@ -391,3 +391,209 @@ async def stream_execution_output(
 
 # Import SessionLocal for background tasks and streaming
 from app.database import AsyncSessionLocal
+
+
+# ============================================================================
+# Workspace File Access Endpoints
+# ============================================================================
+
+
+@router.get("/workspaces/{task_id}/files")
+async def list_workspace_files(
+    task_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all files in a task's workspace.
+
+    Args:
+        task_id: Task UUID
+
+    Returns:
+        List of file paths in the workspace
+    """
+    import os
+    
+    workspace_path = f"/tmp/workspaces/{task_id}"
+    
+    if not os.path.exists(workspace_path):
+        return {"files": [], "workspace_path": workspace_path, "exists": False}
+    
+    files = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        for filename in filenames:
+            full_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(full_path, workspace_path)
+            stat = os.stat(full_path)
+            files.append({
+                "name": filename,
+                "path": rel_path,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+    
+    return {
+        "files": files,
+        "workspace_path": workspace_path,
+        "exists": True,
+        "file_count": len(files),
+    }
+
+
+@router.get("/workspaces/{task_id}/files/{file_path:path}")
+async def get_workspace_file(
+    task_id: UUID,
+    file_path: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get content of a specific file from the workspace.
+
+    Args:
+        task_id: Task UUID
+        file_path: Relative path to the file within workspace
+
+    Returns:
+        File content with metadata
+
+    Raises:
+        HTTPException: 404 if file not found
+    """
+    import os
+    from fastapi.responses import FileResponse, Response
+    
+    workspace_path = f"/tmp/workspaces/{task_id}"
+    full_path = os.path.join(workspace_path, file_path)
+    
+    # Security: Ensure the path doesn't escape the workspace
+    real_workspace = os.path.realpath(workspace_path)
+    real_file = os.path.realpath(full_path)
+    if not real_file.startswith(real_workspace):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied - path traversal detected",
+        )
+    
+    if not os.path.exists(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {file_path}",
+        )
+    
+    if not os.path.isfile(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Path is not a file: {file_path}",
+        )
+    
+    # Determine content type
+    extension = os.path.splitext(file_path)[1].lower()
+    content_types = {
+        ".md": "text/markdown",
+        ".txt": "text/plain",
+        ".py": "text/x-python",
+        ".js": "text/javascript",
+        ".ts": "text/typescript",
+        ".json": "application/json",
+        ".html": "text/html",
+        ".css": "text/css",
+        ".yaml": "text/yaml",
+        ".yml": "text/yaml",
+        ".xml": "application/xml",
+        ".sh": "text/x-shellscript",
+        ".sql": "text/x-sql",
+    }
+    content_type = content_types.get(extension, "text/plain")
+    
+    # Read file content
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        # Binary file - return as download
+        return FileResponse(
+            full_path,
+            filename=os.path.basename(file_path),
+        )
+    
+    stat = os.stat(full_path)
+    
+    return {
+        "name": os.path.basename(file_path),
+        "path": file_path,
+        "content": content,
+        "content_type": content_type,
+        "size": stat.st_size,
+        "modified": stat.st_mtime,
+    }
+
+
+@router.get("/workspaces/{task_id}/raw/{file_path:path}")
+async def get_workspace_file_raw(
+    task_id: UUID,
+    file_path: str,
+):
+    """
+    Get raw file content for direct viewing/downloading in browser.
+
+    Args:
+        task_id: Task UUID
+        file_path: Relative path to the file within workspace
+
+    Returns:
+        Raw file content with appropriate content type for browser display
+
+    Raises:
+        HTTPException: 404 if file not found
+    """
+    import os
+    from fastapi.responses import FileResponse, Response
+    
+    workspace_path = f"/tmp/workspaces/{task_id}"
+    full_path = os.path.join(workspace_path, file_path)
+    
+    # Security: Ensure the path doesn't escape the workspace
+    real_workspace = os.path.realpath(workspace_path)
+    real_file = os.path.realpath(full_path)
+    if not real_file.startswith(real_workspace):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied - path traversal detected",
+        )
+    
+    if not os.path.exists(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {file_path}",
+        )
+    
+    # Determine content type for inline display
+    extension = os.path.splitext(file_path)[1].lower()
+    content_types = {
+        ".md": "text/markdown; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".py": "text/plain; charset=utf-8",
+        ".js": "text/plain; charset=utf-8",
+        ".ts": "text/plain; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".yaml": "text/plain; charset=utf-8",
+        ".yml": "text/plain; charset=utf-8",
+    }
+    content_type = content_types.get(extension, "text/plain; charset=utf-8")
+    
+    # Read and return file
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{os.path.basename(file_path)}"',
+            },
+        )
+    except UnicodeDecodeError:
+        # Binary file
+        return FileResponse(full_path, filename=os.path.basename(file_path))
