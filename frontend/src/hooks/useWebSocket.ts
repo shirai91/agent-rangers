@@ -122,12 +122,18 @@ export function useWebSocket(boardId: string | null) {
 
       ws.onerror = (error) => {
         clearTimeout(connectionTimeout);
-        console.error('WebSocket error:', error);
+        // Don't log error if this was an intentional close (e.g., React StrictMode unmount)
+        if (!isIntentionalCloseRef.current) {
+          console.error('WebSocket error:', error);
+        }
       };
 
       ws.onclose = () => {
         clearTimeout(connectionTimeout);
-        console.log('WebSocket disconnected');
+        // Don't log if this was an intentional close (e.g., React StrictMode unmount)
+        if (!isIntentionalCloseRef.current) {
+          console.log('WebSocket disconnected');
+        }
 
         // Don't reconnect if this was an intentional close
         if (isIntentionalCloseRef.current) {
