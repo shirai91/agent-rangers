@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 from typing import Optional, AsyncGenerator, Callable, Any
 from uuid import UUID
@@ -401,9 +403,7 @@ class AgentOrchestrator:
         on_output: Optional[Callable[[str, dict], Any]] = None,
     ) -> dict:
         """
-        Execute an agent with the given context.
-
-        This is a simulation - in production, this would call claude-flow.
+        Execute an agent with the given context using claude-flow CLI.
 
         Args:
             agent_name: Name of the agent
@@ -411,85 +411,170 @@ class AgentOrchestrator:
             on_output: Optional callback for streaming output
 
         Returns:
-            Agent result dictionary
+            Agent result dictionary with content, structured data, files, and token usage
         """
-        # Simulate agent execution
-        # In production, this would:
-        # 1. Load agent definition from .claude/agents/{agent_name}.yml
-        # 2. Initialize claude-flow with the agent
-        # 3. Execute the agent with context
-        # 4. Stream output via on_output callback
-        # 5. Return structured result
-
-        await asyncio.sleep(0.5)  # Simulate processing time
-
+        # Map phase names to agent names for claude-flow CLI
         phase = context.get("phase", "unknown")
-        task_title = context.get("task_title", "Unknown Task")
+        agent_mapping = {
+            "architecture": "software-architect",
+            "development": "software-developer",
+            "review": "code-reviewer",
+        }
+        cli_agent_name = agent_mapping.get(phase, agent_name)
 
-        if on_output:
-            await on_output("progress", {
-                "agent": agent_name,
-                "phase": phase,
-                "message": f"Processing: {task_title}",
-            })
+        # Working directory where .claude/ config exists
+        working_dir = "/home/shirai91/projects/personal/agent-rangers"
 
-        # Generate simulated output based on phase
-        if phase == "architecture":
-            return {
-                "content": f"# Architecture Plan for: {task_title}\n\n## Overview\nThis is a simulated architecture plan.\n\n## Components\n- Component A\n- Component B\n\n## Implementation Steps\n1. Step 1\n2. Step 2",
-                "structured": {
-                    "architecture_overview": f"Architecture plan for {task_title}",
-                    "components": [
-                        {"name": "Component A", "responsibility": "Handle X"},
-                        {"name": "Component B", "responsibility": "Handle Y"},
-                    ],
-                    "implementation_plan": [
-                        {"step": 1, "description": "Step 1", "files": []},
-                        {"step": 2, "description": "Step 2", "files": []},
-                    ],
-                },
-                "files": [],
-                "tokens_used": 1500,
+        # Create temporary file for input context
+        temp_input_file = None
+        try:
+            # Create temp file with context
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.json',
+                delete=False,
+                dir=working_dir
+            ) as f:
+                json.dump(context, f, indent=2)
+                temp_input_file = f.name
+
+            if on_output:
+                await on_output("progress", {
+                    "agent": agent_name,
+                    "phase": phase,
+                    "message": f"Starting {cli_agent_name} agent...",
+                })
+
+            # Build command
+            cmd = [
+                "npx",
+                "@claude-flow/cli@latest",
+                "agent",
+                "run",
+                cli_agent_name,
+                "--input",
+                temp_input_file,
+                "--output",
+                "json"
+            ]
+
+            # Execute subprocess asynchronously
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=working_dir
+            )
+
+            # Stream output asynchronously
+            stdout_lines = []
+            stderr_lines = []
+
+            async def read_stdout():
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    line_text = line.decode('utf-8').strip()
+                    stdout_lines.append(line_text)
+
+                    # Stream progress updates
+                    if on_output and line_text:
+                        await on_output("progress", {
+                            "agent": agent_name,
+                            "phase": phase,
+                            "message": line_text[:200],  # Truncate long lines
+                        })
+
+            async def read_stderr():
+                while True:
+                    line = await process.stderr.readline()
+                    if not line:
+                        break
+                    line_text = line.decode('utf-8').strip()
+                    stderr_lines.append(line_text)
+
+                    # Log errors but don't fail yet
+                    if line_text:
+                        logger.warning(f"Agent stderr: {line_text}")
+
+            # Read both streams concurrently with timeout
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(read_stdout(), read_stderr()),
+                    timeout=300  # 5 minute timeout
+                )
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise Exception(f"Agent execution timed out after 300 seconds")
+
+            # Check return code
+            if process.returncode != 0:
+                error_msg = "\n".join(stderr_lines) if stderr_lines else "Unknown error"
+                raise Exception(f"Agent execution failed with code {process.returncode}: {error_msg}")
+
+            # Parse JSON output from stdout
+            stdout_text = "\n".join(stdout_lines)
+
+            # Try to find JSON in output (may have other text mixed in)
+            result_data = None
+            for line in stdout_lines:
+                if line.strip().startswith('{'):
+                    try:
+                        result_data = json.loads(line)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+
+            # If no JSON found in individual lines, try the whole output
+            if result_data is None:
+                try:
+                    result_data = json.loads(stdout_text)
+                except json.JSONDecodeError:
+                    # If still no valid JSON, create a basic result
+                    logger.warning(f"Could not parse JSON output, using raw text")
+                    result_data = {
+                        "content": stdout_text,
+                        "structured": None,
+                        "files": [],
+                        "tokens_used": None
+                    }
+
+            # Ensure required keys exist
+            result = {
+                "content": result_data.get("content", stdout_text),
+                "structured": result_data.get("structured"),
+                "files": result_data.get("files", []),
+                "tokens_used": result_data.get("tokens_used")
             }
-        elif phase == "development":
-            return {
-                "content": f"# Implementation for: {task_title}\n\n```python\n# Simulated code\ndef example():\n    pass\n```",
-                "structured": {
-                    "implementation_summary": f"Implemented {task_title}",
-                    "testing_instructions": "Run tests with pytest",
-                },
-                "files": [
-                    {"path": "example.py", "action": "create"},
-                ],
-                "tokens_used": 2500,
-            }
-        elif phase == "review":
-            return {
-                "content": f"# Code Review for: {task_title}\n\n## Status: APPROVED\n\n## Summary\nCode looks good.\n\n## Recommendations\n- Consider adding more tests",
-                "structured": {
-                    "status": "APPROVED",
-                    "summary": {
-                        "critical_count": 0,
-                        "major_count": 0,
-                        "minor_count": 1,
-                    },
-                    "critical_issues": [],
-                    "major_issues": [],
-                    "minor_issues": [
-                        {"issue": "Consider adding more tests", "suggested_fix": "Add unit tests"},
-                    ],
-                    "recommendations": ["Add more comprehensive tests"],
-                },
-                "files": [],
-                "tokens_used": 1000,
-            }
-        else:
-            return {
-                "content": f"Processed: {task_title}",
-                "structured": None,
-                "files": [],
-                "tokens_used": 500,
-            }
+
+            if on_output:
+                await on_output("progress", {
+                    "agent": agent_name,
+                    "phase": phase,
+                    "message": f"Completed {cli_agent_name} agent",
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Agent execution failed: {e}")
+            if on_output:
+                await on_output("error", {
+                    "agent": agent_name,
+                    "phase": phase,
+                    "message": f"Error: {str(e)}",
+                })
+            raise
+        finally:
+            # Clean up temp file
+            if temp_input_file and os.path.exists(temp_input_file):
+                try:
+                    os.unlink(temp_input_file)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file {temp_input_file}: {e}")
 
     # ========================================================================
     # Helper Methods

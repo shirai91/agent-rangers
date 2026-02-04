@@ -1,0 +1,9 @@
+
+# Claude-flow runtime data
+.claude/memory.db
+.swarm/
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/daemon.log
+.claude-flow/daemon.pid
