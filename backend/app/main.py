@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import init_db, close_db
 from app.api import api_router
-from app.api.websocket import manager
+from app.api.websocket import manager, router as ws_router
 
 
 @asynccontextmanager
@@ -127,6 +127,9 @@ async def root():
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+# Include WebSocket routes at root level (not under /api)
+app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 
 
 if __name__ == "__main__":
