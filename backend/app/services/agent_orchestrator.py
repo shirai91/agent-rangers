@@ -1193,9 +1193,11 @@ class HybridOrchestrator:
 
         try:
             # Build the command with stream-json output format
+            # Note: --verbose is required when using -p with --output-format stream-json
             cmd = [
                 claude_path,
                 "--dangerously-skip-permissions",
+                "--verbose",
                 "-p", prompt,
                 "--output-format", "stream-json",
             ]
