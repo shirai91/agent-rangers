@@ -11,6 +11,7 @@ Welcome to the Agent Rangers documentation. This folder contains all technical d
 | [TECH_STACK.md](./TECH_STACK.md) | Technology stack - Exact versions and dependencies |
 | [FRONTEND_GUIDELINES.md](./FRONTEND_GUIDELINES.md) | Design system - Colors, typography, components |
 | [BACKEND_STRUCTURE.md](./BACKEND_STRUCTURE.md) | Backend architecture - Database schema, API contracts |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture - High-level design and hybrid agent approach |
 | [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Build sequence - Step-by-step implementation guide |
 
 ## Document Purposes

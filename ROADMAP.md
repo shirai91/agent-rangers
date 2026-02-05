@@ -446,10 +446,15 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 
 ---
 
-## Phase 3: Claude-Flow Integration ✅ COMPLETE
+## Phase 3: Hybrid Agent Integration ✅ COMPLETE
 **Timeline:** Weeks 5-7
 **Status:** Done (2026-02-04)
 **Estimated Hours:** 80h
+
+> **Note:** Originally planned as "Claude-Flow Integration" but pivoted to a hybrid approach:
+> - Direct Anthropic API for planning and review phases
+> - Claude CLI (OAuth) for development phase with full codebase access
+> - No external framework dependencies
 
 ### 3.1 Claude-Flow Setup
 - [x] Install claude-flow globally:
@@ -833,6 +838,67 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 
 ---
 
+## Phase 3.1: Architecture Phase Improvements ✅ COMPLETE
+**Timeline:** 1 week
+**Status:** Done (2026-02-04)
+**Estimated Hours:** 8h | **Actual:** ~2h
+
+### 3.1.1 Claude CLI Integration for Architecture Phase
+- [x] Created `_run_claude_cli_simple()` using `script -q -c '...'` for reliable PTY
+- [x] Architecture phase now runs Claude CLI in project directory with codebase access
+- [x] Set `CLAUDE_CONFIG_DIR=/home/shirai91/.claude` for OAuth authentication
+- [x] Added `--dangerously-skip-permissions` flag for autonomous operation
+
+### 3.1.2 Workspace Output Storage
+- [x] Architecture output saves to `/tmp/workspaces/{task_id}/` (not project directory)
+- [x] Output filename: `plan-{short_summary}.md` (slugified task title, max 30 chars)
+- [x] Created `_generate_short_filename()` helper method
+- [x] Prompt instructs Claude: "DO NOT create or modify any files"
+
+### 3.1.3 File Reading API Endpoints
+- [x] `GET /api/agents/files/read?path=` - Returns file content as JSON
+- [x] `GET /api/agents/files/raw?path=` - Returns raw file for browser viewing
+- [x] Security: Only allows paths under `/home/shirai91/projects/` and `/tmp/workspaces/`
+
+### 3.1.4 Frontend Updates
+- [x] AgentOutputViewer handles both workspace and absolute project paths
+- [x] Removed redundant "Output Files" section from ExecutionDetails
+- [x] Execution details expand inline below selected execution item
+
+---
+
+## Phase 3+: Repository Awareness & Auto-Evaluation 🔄 IN PROGRESS
+**Timeline:** 1 week
+**Status:** Backend Complete, Frontend Partial
+**Estimated Hours:** 20h | **Actual:** ~3h
+
+### Overview
+Introduces standardized file storage (`~/.agent-rangers/`), repository scanning, and automatic task evaluation to determine which repository a task relates to.
+
+### Backend Implementation ✅
+- [x] `FileStorageService` - Manages `~/.agent-rangers/` directory structure
+- [x] `RepositoryScannerService` - Scans working directory for git repos
+- [x] `TaskEvaluatorService` - LLM determines relevant repository for tasks
+- [x] `PATCH /api/boards/{id}/working-directory` - Set working directory, trigger scan
+- [x] `GET /api/boards/{id}/repositories` - List scanned repositories
+- [x] `POST /api/boards/{id}/repositories/scan` - Re-scan repositories
+- [x] Auto-evaluation trigger on task changes (background)
+- [x] Database migration for `working_directory` column on boards
+
+### Frontend Implementation 🔄
+- [x] `BoardSettingsDialog.tsx` created (basic)
+- [ ] Working directory input in board settings
+- [ ] Repository list display
+- [ ] Task evaluation badge on TaskCard
+- [ ] Re-evaluate button
+
+### Remaining Work
+- [ ] Complete frontend board settings UI
+- [ ] Show evaluation results in task details
+- [ ] Agent orchestrator uses evaluation info.json for cwd
+
+---
+
 ## Phase 4: Knowledge Sharing (RAG) 🔲 NOT STARTED
 **Timeline:** Weeks 8-9  
 **Status:** Pending (requires Phase 3)  
@@ -1194,12 +1260,20 @@ alembic downgrade -1
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Complete | 100% |
 | Phase 2: Workflow Engine | ✅ Complete | 100% |
-| Phase 3: Claude-Flow | ✅ Complete | 100% |
+| Phase 3: Hybrid Agent Integration | ✅ Complete | 100% |
+| Phase 3.1: Architecture Improvements | ✅ Complete | 100% |
+| Phase 3+: Repository Awareness | 🔄 In Progress | 70% |
 | Phase 4: Knowledge (RAG) | 🔲 Not Started | 0% |
 | Phase 5: Polish | 🔲 Not Started | 0% |
 
-**Overall Progress:** ~60% (Phase 1, 2, 3 complete)
+**Overall Progress:** ~70% (Phase 1, 2, 3, 3.1 complete, 3+ backend done)
+
+### Key Technical Decisions
+- **Hybrid approach**: Direct API for planning/review, Claude CLI for development
+- **OAuth authentication**: Uses `CLAUDE_CONFIG_DIR=/home/shirai91/.claude` (Max subscription)
+- **PTY via script**: `script -q -c 'command' /dev/null` for reliable terminal emulation
+- **Workspace isolation**: Architecture outputs to `/tmp/workspaces/{task_id}/`
 
 ---
 
-*Last updated: 2026-02-04*
+*Last updated: 2026-02-05*

@@ -17,7 +17,8 @@ This document provides a **sequential build order** for Agent Rangers. Each step
 | 1 | Core Kanban Foundation | 2 weeks | ✅ Complete |
 | 2 | Workflow Engine | 2 weeks | ✅ Complete |
 | 3 | Hybrid Agent Integration | 3 weeks | ✅ Complete |
-| 3+ | Repository Awareness & Auto-Evaluation | 1 week | 🔲 Not Started |
+| 3.1 | Architecture Phase Improvements | 1 week | ✅ Complete |
+| 3+ | Repository Awareness & Auto-Evaluation | 1 week | 🔄 In Progress (70%) |
 | 4 | Knowledge Base (RAG) | 2 weeks | 🔲 Not Started |
 | 5 | Polish & Optimization | 3 weeks | 🔲 Not Started |
 
@@ -691,11 +692,86 @@ Add endpoints:
 
 ---
 
-## 5. Phase 3+: Repository Awareness & Auto-Evaluation 🔲
+## 4.5. Phase 3.1: Architecture Phase Improvements ✅
+
+### Overview
+
+Phase 3.1 improves the architecture phase to use Claude CLI instead of direct API calls, enabling the planner to explore the actual codebase before creating architecture plans.
+
+### Step 3.1.1: Claude CLI Integration for Architecture Phase
+**Time:** 2 hours
+
+- [x] Created `_run_claude_cli_simple()` using `script -q -c '...'` for reliable PTY
+- [x] Architecture phase now runs Claude CLI in the project directory
+- [x] Set `CLAUDE_CONFIG_DIR` to `/home/shirai91/.claude` for OAuth authentication
+- [x] Added `--dangerously-skip-permissions` flag for autonomous operation
+
+**Deliverables:**
+- [x] Architecture phase uses Claude CLI with codebase access
+- [x] OAuth authentication works via CLAUDE_CONFIG_DIR
+
+---
+
+### Step 3.1.2: Workspace Output Storage
+**Time:** 1 hour
+
+- [x] Architecture output now saves to `/tmp/workspaces/{task_id}/` (workspace)
+- [x] Output filename: `plan-{short_summary}.md` (slugified task title, max 30 chars)
+- [x] Created `_generate_short_filename()` helper method
+- [x] Prompt instructs Claude: "DO NOT create or modify any files" - output plan as text only
+
+**Deliverables:**
+- [x] Plans saved to workspace, not project directory
+- [x] Clean filename generation from task titles
+
+---
+
+### Step 3.1.3: File Reading API Endpoints
+**Time:** 1.5 hours
+
+- [x] `GET /api/agents/files/read?path=` - Returns file content as JSON
+- [x] `GET /api/agents/files/raw?path=` - Returns raw file for browser viewing
+- [x] Security: Only allows paths under `/home/shirai91/projects/` and `/tmp/workspaces/`
+
+**Deliverables:**
+- [x] File reading endpoints working
+- [x] Path validation prevents directory traversal
+
+---
+
+### Step 3.1.4: Frontend AgentOutputViewer Updates
+**Time:** 1 hour
+
+- [x] Updated to handle both workspace paths and absolute project paths
+- [x] Removed redundant "Output Files" section from ExecutionDetails
+- [x] Execution details now expand inline below selected execution item
+
+**Deliverables:**
+- [x] Output viewer works for all path types
+- [x] Cleaner UI without duplicate file listings
+
+---
+
+### Step 3.1.5: Testing & Commit
+**Time:** 1 hour
+
+1. Test "Plan Only" (architecture_only) workflow end-to-end
+2. Verify architecture output saved to workspace
+3. Verify file viewing works in UI
+
+**Deliverables:**
+- [x] Architecture phase runs with codebase exploration
+- [x] Outputs viewable in UI
+
+---
+
+## 5. Phase 3+: Repository Awareness & Auto-Evaluation 🔄 (In Progress)
 
 ### Overview
 
 Phase 3+ introduces standardized file storage, repository awareness, and automatic task evaluation. This enables the system to intelligently determine which repository a task relates to and spawn agents in the correct working directory.
+
+**Status:** Backend services complete, API endpoints complete, frontend partial.
 
 ### 5.0 Directory Structure
 
@@ -718,7 +794,7 @@ Phase 3+ introduces standardized file storage, repository awareness, and automat
 
 ---
 
-### Step 3+.1: File Storage Service
+### Step 3+.1: File Storage Service ✅
 **Time:** 2 hours
 
 Create `backend/app/services/file_storage.py`:
@@ -730,13 +806,13 @@ Create `backend/app/services/file_storage.py`:
 5. Methods: `get_config()`, `save_config()`
 
 **Deliverables:**
-- [ ] FileStorageService created
-- [ ] Directory structure initializes on startup
-- [ ] Can save/load files to correct locations
+- [x] FileStorageService created (264 lines)
+- [x] Directory structure initializes on startup
+- [x] Can save/load files to correct locations
 
 ---
 
-### Step 3+.2: Database Migration - Board Working Directory
+### Step 3+.2: Database Migration - Board Working Directory ✅
 **Time:** 1 hour
 
 Create migration `004_board_working_directory.py`:
@@ -746,9 +822,9 @@ Create migration `004_board_working_directory.py`:
 Update Board model and schemas.
 
 **Deliverables:**
-- [ ] Migration created and applied
-- [ ] Board model updated
-- [ ] Board schemas updated
+- [x] Migration created and applied
+- [x] Board model updated
+- [x] Board schemas updated
 
 ---
 
@@ -764,13 +840,13 @@ Create `backend/app/services/repository_scanner.py`:
 5. `get_repository_info()` - get repo metadata (languages, etc.)
 
 **Deliverables:**
-- [ ] Scanner finds git repositories
-- [ ] Repositories saved to jsonl
-- [ ] Can load and query repositories
+- [x] Scanner finds git repositories (340 lines)
+- [x] Repositories saved to jsonl
+- [x] Can load and query repositories
 
 ---
 
-### Step 3+.4: Working Directory API
+### Step 3+.4: Working Directory API ✅
 **Time:** 1.5 hours
 
 Add endpoints to `backend/app/api/boards.py`:
@@ -780,13 +856,13 @@ Add endpoints to `backend/app/api/boards.py`:
 3. `POST /api/boards/{board_id}/repositories/scan` - Re-scan repositories
 
 **Deliverables:**
-- [ ] Endpoints created
-- [ ] Setting working directory triggers scan
-- [ ] Repositories returned correctly
+- [x] Endpoints created
+- [x] Setting working directory triggers scan
+- [x] Repositories returned correctly
 
 ---
 
-### Step 3+.5: Task Evaluator Service
+### Step 3+.5: Task Evaluator Service ✅
 **Time:** 3 hours
 
 Create `backend/app/services/task_evaluator.py`:
@@ -817,13 +893,13 @@ Create `backend/app/services/task_evaluator.py`:
 ```
 
 **Deliverables:**
-- [ ] TaskEvaluatorService created
-- [ ] LLM prompt working
-- [ ] info.json saved correctly
+- [x] TaskEvaluatorService created (308 lines)
+- [x] LLM prompt working (uses ProviderFactory)
+- [x] info.json saved correctly
 
 ---
 
-### Step 3+.6: Evaluate Workflow Type
+### Step 3+.6: Evaluate Workflow Type ✅
 **Time:** 2 hours
 
 1. Add `evaluate` to WorkflowType enum
@@ -832,13 +908,13 @@ Create `backend/app/services/task_evaluator.py`:
 4. Auto-trigger evaluate on task update (title/description change)
 
 **Deliverables:**
-- [ ] `evaluate` workflow type added
-- [ ] Auto-triggers on task create
-- [ ] Auto-triggers on task update
+- [x] Background evaluation trigger added to boards API
+- [x] Auto-triggers on task create/update (via background task)
+- [x] Evaluation runs asynchronously
 
 ---
 
-### Step 3+.7: Agent Runner Integration
+### Step 3+.7: Agent Runner Integration 🔲
 **Time:** 2 hours
 
 Update `backend/app/services/agent_runner.py`:
@@ -869,7 +945,7 @@ Update `backend/app/services/agent_runner.py`:
 
 ---
 
-### Step 3+.9: Frontend - Board Settings Update
+### Step 3+.9: Frontend - Board Settings Update 🔄
 **Time:** 2 hours
 
 Update board settings UI:
@@ -880,13 +956,14 @@ Update board settings UI:
 4. Show scan status/errors
 
 **Deliverables:**
-- [ ] Working directory setting in UI
-- [ ] Scan button works
-- [ ] Repositories displayed
+- [x] BoardSettingsDialog.tsx created (basic structure)
+- [ ] Working directory input field
+- [ ] Scan button functionality
+- [ ] Repositories list display
 
 ---
 
-### Step 3+.10: Frontend - Task Evaluation Display
+### Step 3+.10: Frontend - Task Evaluation Display 🔲
 **Time:** 1.5 hours
 
 1. Show repository badge on TaskCard when info.json exists
@@ -1138,14 +1215,16 @@ If a step fails:
 | Phase | Estimated | Actual |
 |-------|-----------|--------|
 | Phase 1 | 40 hours | ~2 hours (AI-assisted) |
-| Phase 2 | 60 hours | TBD |
-| Phase 3 | 80 hours | TBD |
-| Phase 3+ | 20 hours | TBD |
-| Phase 4 | 60 hours | TBD |
-| Phase 5 | 50 hours | TBD |
-| **Total** | **310 hours** | TBD |
+| Phase 2 | 60 hours | ~1 hour (AI-assisted) |
+| Phase 3 | 80 hours | ~3 hours (AI-assisted) |
+| Phase 3.1 | 8 hours | ~2 hours (AI-assisted) |
+| Phase 3+ | 20 hours | Not started |
+| Phase 4 | 60 hours | Not started |
+| Phase 5 | 50 hours | Not started |
+| **Total** | **318 hours** | ~8 hours so far |
 
 ---
 
 *Document Owner: Agent Rangers Team*  
 *Review Cycle: Each phase completion*
+*Last Updated: 2026-02-05*

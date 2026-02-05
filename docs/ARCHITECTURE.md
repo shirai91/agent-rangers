@@ -296,7 +296,9 @@ Activities are streamed via:
 |-------|-------|--------|
 | **Phase 1** | Core Kanban Foundation | ✅ Complete |
 | **Phase 2** | Workflow Engine | ✅ Complete |
-| **Phase 3** | Hybrid Agent Integration | 🔄 In Progress |
+| **Phase 3** | Hybrid Agent Integration | ✅ Complete |
+| **Phase 3.1** | Architecture Phase Improvements | ✅ Complete |
+| **Phase 3+** | Repository Awareness & Auto-Evaluation | 🔄 In Progress (Backend ✅, Frontend 🔄) |
 | **Phase 4** | Knowledge Base (RAG) | 🔲 Not Started |
 | **Phase 5** | Polish & Optimization | 🔲 Not Started |
 
