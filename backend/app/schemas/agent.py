@@ -101,3 +101,26 @@ class ExecutionStatusResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ClarifyRequest(BaseModel):
+    """Schema for submitting clarification answers."""
+
+    answers: list[str] = Field(
+        ...,
+        description="Answers to the clarification questions (in order)",
+        min_length=1,
+    )
+
+
+class ClarifyResponse(BaseModel):
+    """Schema for clarification submission response."""
+
+    execution_id: UUID
+    task_id: UUID
+    status: str = Field(
+        description="New execution status after clarification"
+    )
+    message: str = Field(
+        description="Human-readable status message"
+    )

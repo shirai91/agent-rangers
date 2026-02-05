@@ -294,7 +294,15 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
             {showOutputs && (
               <div className="px-3 pb-3 pt-1 space-y-2 max-h-[600px] overflow-y-auto">
                 {execution.outputs.map((output) => (
-                  <AgentOutputViewer key={output.id} output={output} />
+                  <AgentOutputViewer 
+                    key={output.id} 
+                    output={output} 
+                    taskId={execution.task_id}
+                    onClarificationSubmit={() => {
+                      // Trigger a refresh - parent component should handle this
+                      window.location.reload();
+                    }}
+                  />
                 ))}
               </div>
             )}

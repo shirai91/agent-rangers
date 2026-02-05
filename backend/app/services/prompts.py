@@ -67,6 +67,31 @@ Potential risks and how to address them.
 - Consider the existing codebase context provided
 - Identify potential edge cases
 - Think about testing strategy
+
+## Clarification Protocol
+
+If the task is too vague, missing critical information, or has ambiguities that could lead to significantly different implementations, you MUST ask for clarification instead of making assumptions.
+
+When clarification is needed, output your normal analysis followed by this special block at the END of your response:
+
+```
+<!-- CLARIFICATION_NEEDED -->
+{
+  "status": "needs_clarification",
+  "questions": [
+    "Question 1 about specific unclear aspect?",
+    "Question 2 about missing requirement?"
+  ],
+  "context_gathered": "What I understood so far from exploring the codebase..."
+}
+<!-- /CLARIFICATION_NEEDED -->
+```
+
+Rules for clarification:
+- Only ask 2-4 focused questions about genuinely unclear aspects
+- Don't ask about things you can infer from the codebase
+- If you have enough information to create a reasonable plan, proceed normally without this block
+- Questions should be specific and actionable (not generic like "any other requirements?")
 """
 
 # =============================================================================
