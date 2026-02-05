@@ -797,6 +797,19 @@ class HybridOrchestrator:
                 db, task, execution, workspace_path
             )
 
+            # Get branch info and checkout if needed
+            branch_info = await self._get_task_branch(
+                board_id=str(execution.board_id),
+                task_id=str(task.id),
+            )
+            checkout_result = None
+            if branch_info and branch_info.get("name"):
+                checkout_result = self._checkout_branch(effective_cwd, branch_info["name"])
+                if checkout_result.get("success"):
+                    logger.info(f"Working on branch: {branch_info['name']} (source: {branch_info.get('source', 'unknown')})")
+                else:
+                    logger.warning(f"Failed to checkout branch {branch_info['name']}, continuing on current branch")
+
             # Capture git state BEFORE development
             pre_git_state = self._capture_git_state(effective_cwd)
             logger.info(f"Pre-development git state: is_repo={pre_git_state.get('is_git_repo')}")
@@ -853,6 +866,11 @@ class HybridOrchestrator:
             output.output_structured = {
                 **(result.get("structured") or {}),
                 "git_changes": git_changes,  # Store detailed git change info including commit
+                "branch": {
+                    "name": branch_info.get("name") if branch_info else None,
+                    "source": branch_info.get("source") if branch_info else None,
+                    "checkout_success": checkout_result.get("success") if checkout_result else None,
+                },
             }
             output.tokens_used = result.get("tokens_used")
             output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
@@ -1816,6 +1834,115 @@ Created sample implementation at: {sample_file}
         # 3. Fall back to default workspace
         logger.info(f"Using default workspace: {default_workspace}")
         return default_workspace
+
+    async def _get_task_branch(
+        self,
+        board_id: str,
+        task_id: str,
+    ) -> Optional[dict]:
+        """
+        Get the branch info from task's info.json.
+        
+        Args:
+            board_id: Board ID
+            task_id: Task ID
+            
+        Returns:
+            Branch info dict or None: {"name": "main", "source": "default", ...}
+        """
+        try:
+            info_content = file_storage.load_output(
+                board_id=board_id,
+                task_id=task_id,
+                filename="info.json",
+            )
+            if info_content:
+                info_data = json.loads(info_content)
+                return info_data.get("branch")
+        except Exception as e:
+            logger.warning(f"Error loading branch info for task {task_id}: {e}")
+        return None
+
+    def _checkout_branch(self, repo_path: str, branch_name: str) -> dict:
+        """
+        Checkout a specific branch in the repository.
+        
+        Args:
+            repo_path: Path to the repository
+            branch_name: Branch name to checkout
+            
+        Returns:
+            Result dict: {"success": True/False, "previous_branch": "...", "error": "..."}
+        """
+        result = {
+            "success": False,
+            "branch": branch_name,
+            "previous_branch": None,
+            "error": None,
+        }
+        
+        try:
+            # Get current branch first
+            current_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if current_result.returncode == 0:
+                result["previous_branch"] = current_result.stdout.strip()
+                
+                # If already on the target branch, no need to checkout
+                if result["previous_branch"] == branch_name:
+                    result["success"] = True
+                    logger.info(f"Already on branch {branch_name}")
+                    return result
+            
+            # Fetch latest from remote (ignore errors if offline)
+            subprocess.run(
+                ["git", "fetch", "--quiet"],
+                cwd=repo_path,
+                capture_output=True,
+                timeout=30,
+            )
+            
+            # Try to checkout the branch
+            checkout_result = subprocess.run(
+                ["git", "checkout", branch_name],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            if checkout_result.returncode == 0:
+                result["success"] = True
+                logger.info(f"Checked out branch {branch_name} in {repo_path}")
+            else:
+                # Branch might not exist locally, try to checkout from remote
+                checkout_result = subprocess.run(
+                    ["git", "checkout", "-b", branch_name, f"origin/{branch_name}"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if checkout_result.returncode == 0:
+                    result["success"] = True
+                    logger.info(f"Checked out remote branch {branch_name} in {repo_path}")
+                else:
+                    result["error"] = checkout_result.stderr.strip()
+                    logger.warning(f"Failed to checkout branch {branch_name}: {result['error']}")
+                    
+        except subprocess.TimeoutExpired:
+            result["error"] = "Git operation timed out"
+            logger.warning(f"Git checkout timed out for branch {branch_name}")
+        except Exception as e:
+            result["error"] = str(e)
+            logger.warning(f"Error checking out branch {branch_name}: {e}")
+            
+        return result
 
     def _list_workspace_files(self, workspace_path: str, max_files: int = 100) -> list:
         """List files in workspace (limited to prevent huge responses)."""

@@ -48,6 +48,12 @@ interface GitChanges {
   commit?: GitCommit;
 }
 
+interface BranchInfo {
+  name: string | null;
+  source: string | null;
+  checkout_success: boolean | null;
+}
+
 interface AgentOutputViewerProps {
   output: AgentOutput;
 }
@@ -424,6 +430,34 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
             )}
           </div>
         )}
+
+        {/* Branch info */}
+        {(() => {
+          const branchInfo = output.output_structured?.branch as BranchInfo | undefined;
+          if (!branchInfo?.name) return null;
+          
+          const sourceLabel = {
+            'task_text': 'from task',
+            'llm_suggestion': 'detected',
+            'default': 'default',
+          }[branchInfo.source || 'default'] || branchInfo.source;
+          
+          return (
+            <div className="flex items-center gap-2 text-xs p-2 bg-muted/50 rounded-md">
+              <GitBranch className="h-4 w-4 text-purple-600" />
+              <span className="font-medium">Branch:</span>
+              <code className="bg-muted px-1.5 py-0.5 rounded">{branchInfo.name}</code>
+              <Badge variant="outline" className="text-xs">
+                {sourceLabel}
+              </Badge>
+              {branchInfo.checkout_success === false && (
+                <Badge variant="destructive" className="text-xs">
+                  checkout failed
+                </Badge>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Files Changed - collapsible (with git tracking support) */}
         {(() => {

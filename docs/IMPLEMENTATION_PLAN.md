@@ -809,7 +809,42 @@ Modified (M):
 
 ---
 
-### Step 3.1.7: Testing & Commit
+### Step 3.1.7: Git Branch Detection & Checkout ✅
+**Time:** 2 hours
+
+Detect and checkout the appropriate git branch for each task:
+
+**Branch Detection Priority:**
+1. Branch explicitly mentioned in task title/description (e.g., "branch: feature/login", "on branch develop")
+2. Branch suggested by LLM during task evaluation
+3. Default branch (main or master, whichever has most recent commit)
+
+**Backend (`task_evaluator.py`):**
+- `_get_repo_branches()` - lists branches sorted by last commit date
+- `_get_default_branch()` - determines main vs master by recency
+- `_detect_branch_from_text()` - regex patterns for branch references
+- Updated prompt to ask LLM about branch mentions
+- Branch info saved in info.json
+
+**Backend (`agent_orchestrator.py`):**
+- `_get_task_branch()` - loads branch info from info.json
+- `_checkout_branch()` - checkouts target branch before development
+- Branch info stored in output_structured for frontend
+
+**Frontend:**
+- Shows branch name with purple GitBranch icon
+- Displays source indicator (from task / detected / default)
+- Shows warning if checkout failed
+
+**Deliverables:**
+- [x] Branch detection from task text
+- [x] LLM-assisted branch detection
+- [x] Auto-checkout before development
+- [x] Frontend branch display
+
+---
+
+### Step 3.1.8: Testing & Commit
 **Time:** 1 hour
 
 1. Test "Plan Only" (architecture_only) workflow end-to-end
@@ -817,12 +852,14 @@ Modified (M):
 3. Verify file viewing works in UI
 4. Test git change tracking shows actual changes
 5. Test auto-commit creates proper commit
+6. Test branch detection and checkout
 
 **Deliverables:**
 - [x] Architecture phase runs with codebase exploration
 - [x] Outputs viewable in UI
 - [x] Git changes tracked accurately
 - [x] Auto-commit works correctly
+- [x] Branch detection and checkout works
 
 ---
 

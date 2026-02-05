@@ -1,11 +1,13 @@
 """Task evaluator service for Agent Rangers.
 
 Evaluates tasks to determine which repository they relate to using LLM analysis.
+Also detects the appropriate git branch to work on.
 """
 
 import json
 import logging
 import re
+import subprocess
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -28,6 +30,142 @@ class TaskEvaluatorService:
     def __init__(self) -> None:
         """Initialize the task evaluator service."""
         self._provider = None
+
+    def _get_repo_branches(self, repo_path: str) -> list[dict]:
+        """
+        Get list of branches for a repository with their last commit info.
+        
+        Args:
+            repo_path: Path to the git repository.
+            
+        Returns:
+            List of branch info dicts: [{"name": "main", "last_commit": "2026-02-05T10:00:00", "is_current": True}, ...]
+        """
+        try:
+            # Get all branches with last commit date
+            result = subprocess.run(
+                ["git", "for-each-ref", "--sort=-committerdate", 
+                 "--format=%(refname:short)|%(committerdate:iso8601)|%(HEAD)", 
+                 "refs/heads/"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"Failed to get branches for {repo_path}: {result.stderr}")
+                return []
+            
+            branches = []
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    branches.append({
+                        "name": parts[0],
+                        "last_commit": parts[1] if len(parts) > 1 else None,
+                        "is_current": parts[2] == "*" if len(parts) > 2 else False,
+                    })
+            
+            return branches
+        except Exception as e:
+            logger.warning(f"Error getting branches for {repo_path}: {e}")
+            return []
+
+    def _get_default_branch(self, repo_path: str) -> str:
+        """
+        Determine the default branch (main or master, whichever has most recent commit).
+        
+        Args:
+            repo_path: Path to the git repository.
+            
+        Returns:
+            Branch name (defaults to "main" if unable to determine).
+        """
+        try:
+            branches = self._get_repo_branches(repo_path)
+            
+            # Look for main or master
+            main_branch = None
+            master_branch = None
+            
+            for branch in branches:
+                if branch["name"] == "main":
+                    main_branch = branch
+                elif branch["name"] == "master":
+                    master_branch = branch
+            
+            # If both exist, return the one with most recent commit
+            if main_branch and master_branch:
+                # Branches are sorted by commit date (newest first), so check order
+                for branch in branches:
+                    if branch["name"] in ("main", "master"):
+                        return branch["name"]
+            
+            # Return whichever exists
+            if main_branch:
+                return "main"
+            if master_branch:
+                return "master"
+            
+            # If neither main nor master, return the most recent branch
+            if branches:
+                return branches[0]["name"]
+            
+            return "main"  # Fallback
+            
+        except Exception as e:
+            logger.warning(f"Error determining default branch for {repo_path}: {e}")
+            return "main"
+
+    def _detect_branch_from_text(self, text: str, available_branches: list[str]) -> Optional[str]:
+        """
+        Try to detect a branch name mentioned in the task text.
+        
+        Args:
+            text: Task title and description combined.
+            available_branches: List of available branch names.
+            
+        Returns:
+            Detected branch name or None.
+        """
+        text_lower = text.lower()
+        
+        # Common patterns for branch references
+        patterns = [
+            r'branch[:\s]+["\']?([a-zA-Z0-9_\-/]+)["\']?',
+            r'on\s+branch\s+["\']?([a-zA-Z0-9_\-/]+)["\']?',
+            r'in\s+branch\s+["\']?([a-zA-Z0-9_\-/]+)["\']?',
+            r'from\s+branch\s+["\']?([a-zA-Z0-9_\-/]+)["\']?',
+            r'to\s+branch\s+["\']?([a-zA-Z0-9_\-/]+)["\']?',
+            r'feature[/\-]([a-zA-Z0-9_\-]+)',
+            r'bugfix[/\-]([a-zA-Z0-9_\-]+)',
+            r'hotfix[/\-]([a-zA-Z0-9_\-]+)',
+            r'release[/\-]([a-zA-Z0-9_\-]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                detected = match.group(1)
+                # Check if it's a full branch name in available branches
+                if detected in available_branches:
+                    return detected
+                # Check for partial matches (e.g., "feature/login" when user says "login")
+                for branch in available_branches:
+                    if detected.lower() in branch.lower():
+                        return branch
+        
+        # Direct mention of branch names
+        for branch in available_branches:
+            # Escape special regex characters in branch name
+            escaped_branch = re.escape(branch)
+            if re.search(rf'\b{escaped_branch}\b', text, re.IGNORECASE):
+                return branch
+        
+        return None
 
     @property
     def provider(self):
@@ -117,6 +255,7 @@ class TaskEvaluatorService:
             "task_id": task_id,
             "evaluated_at": evaluated_at,
             "repository": None,
+            "branch": None,
             "context": {
                 "relevant_files": [],
                 "technologies": [],
@@ -144,11 +283,82 @@ class TaskEvaluatorService:
             if parsed:
                 result["repository"] = parsed.get("repository")
                 result["context"] = parsed.get("context", result["context"])
+                
+                # Determine branch after we know the repository
+                if result["repository"] and result["repository"].get("path"):
+                    repo_path = result["repository"]["path"]
+                    branch_info = self._determine_branch(
+                        repo_path=repo_path,
+                        task_title=task_title,
+                        task_description=task_description,
+                        llm_suggested_branch=parsed.get("branch"),
+                    )
+                    result["branch"] = branch_info
 
         except Exception as e:
             logger.error(f"Failed to evaluate task {task_id}: {e}")
 
         return result
+
+    def _determine_branch(
+        self,
+        repo_path: str,
+        task_title: str,
+        task_description: str,
+        llm_suggested_branch: Optional[str] = None,
+    ) -> dict:
+        """
+        Determine which branch to use for the task.
+        
+        Priority:
+        1. Branch explicitly mentioned in task title/description
+        2. Branch suggested by LLM
+        3. Default branch (main/master with most recent commit)
+        
+        Args:
+            repo_path: Path to the repository.
+            task_title: Task title.
+            task_description: Task description.
+            llm_suggested_branch: Branch name suggested by LLM (if any).
+            
+        Returns:
+            Branch info dict: {"name": "main", "source": "default", "available_branches": [...]}
+        """
+        # Get available branches
+        branches = self._get_repo_branches(repo_path)
+        available_branch_names = [b["name"] for b in branches]
+        
+        branch_info = {
+            "name": None,
+            "source": None,
+            "available_branches": available_branch_names[:10],  # Limit for readability
+        }
+        
+        # Combine task text for branch detection
+        task_text = f"{task_title}\n{task_description or ''}"
+        
+        # 1. Check for explicit branch mention in task
+        detected_branch = self._detect_branch_from_text(task_text, available_branch_names)
+        if detected_branch:
+            branch_info["name"] = detected_branch
+            branch_info["source"] = "task_text"
+            logger.info(f"Branch detected from task text: {detected_branch}")
+            return branch_info
+        
+        # 2. Check LLM suggestion
+        if llm_suggested_branch and llm_suggested_branch in available_branch_names:
+            branch_info["name"] = llm_suggested_branch
+            branch_info["source"] = "llm_suggestion"
+            logger.info(f"Using LLM suggested branch: {llm_suggested_branch}")
+            return branch_info
+        
+        # 3. Use default branch (main/master with most recent commit)
+        default_branch = self._get_default_branch(repo_path)
+        branch_info["name"] = default_branch
+        branch_info["source"] = "default"
+        logger.info(f"Using default branch: {default_branch}")
+        
+        return branch_info
 
     def _build_prompt(
         self,
@@ -187,7 +397,7 @@ class TaskEvaluatorService:
 
         repos_text = "\n".join(repo_descriptions)
 
-        prompt = f"""You are a task analyzer. Given a task and a list of repositories, determine which repository the task most likely relates to.
+        prompt = f"""You are a task analyzer. Given a task and a list of repositories, determine which repository the task most likely relates to, and if a specific git branch is mentioned.
 
 ## Task
 **Title:** {task_title}
@@ -197,10 +407,15 @@ class TaskEvaluatorService:
 {repos_text}
 
 ## Instructions
-Analyze the task and determine which repository it most likely relates to. Consider:
+Analyze the task and determine:
+1. Which repository the task most likely relates to
+2. If a specific git branch is mentioned (look for patterns like "branch: X", "on branch X", "feature/X", "bugfix/X", etc.)
+
+Consider:
 - Keywords in the task title and description
 - Technology/language mentioned vs repository's primary language
 - Domain-specific terms that might match repository names
+- Any branch names or patterns mentioned
 
 Respond in JSON format:
 ```json
@@ -211,6 +426,7 @@ Respond in JSON format:
         "confidence": 0.0 to 1.0,
         "reasoning": "Brief explanation of why this repository matches"
     }},
+    "branch": "branch-name-if-mentioned-or-null",
     "context": {{
         "relevant_files": ["list of potentially relevant file paths or patterns"],
         "technologies": ["list of technologies mentioned or inferred"]
@@ -219,6 +435,7 @@ Respond in JSON format:
 ```
 
 If no repository clearly matches, set "repository" to null.
+If no branch is explicitly mentioned, set "branch" to null (the system will use the default branch).
 Only output the JSON, no other text."""
 
         return prompt
@@ -283,6 +500,12 @@ Only output the JSON, no other text."""
                     parsed["context"]["relevant_files"] = []
                 if "technologies" not in parsed["context"]:
                     parsed["context"]["technologies"] = []
+
+            # Ensure branch is a string or None
+            if "branch" in parsed and parsed["branch"]:
+                parsed["branch"] = str(parsed["branch"])
+            else:
+                parsed["branch"] = None
 
             return parsed
 
