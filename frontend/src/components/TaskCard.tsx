@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,9 +16,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { MoreVertical, Trash2, Edit, GripVertical } from 'lucide-react';
-import type { Task, AgentStatus, WorkflowType } from '@/types';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { MoreVertical, Trash2, Edit, GripVertical, GitBranch, Loader2 } from 'lucide-react';
+import type { Task, AgentStatus, WorkflowType, TaskEvaluation } from '@/types';
 import { useBoardStore } from '@/stores/boardStore';
+import { api } from '@/api/client';
 import { AgentStatusBadge } from './AgentStatusBadge';
 import { AgentControlPanel } from './AgentControlPanel';
 import { AgentExecutionPanel } from './AgentExecutionPanel';
@@ -31,6 +42,9 @@ interface TaskCardProps {
 export function TaskCard({ task, onEdit }: TaskCardProps) {
   const { deleteTask, startAgentWorkflow, cancelExecution } = useBoardStore();
   const [showExecutionPanel, setShowExecutionPanel] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [evaluation, setEvaluation] = useState<TaskEvaluation | null>(null);
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
   const {
     attributes,
     listeners,
@@ -40,6 +54,32 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
     isDragging,
   } = useSortable({ id: task.id });
 
+  // Fetch evaluation on mount
+  useEffect(() => {
+    let mounted = true;
+    setEvaluationLoading(true);
+    api.getTaskEvaluation(task.id)
+      .then((result) => {
+        if (mounted) {
+          setEvaluation(result);
+        }
+      })
+      .catch(() => {
+        // No evaluation available, that's fine
+        if (mounted) {
+          setEvaluation(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setEvaluationLoading(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [task.id]);
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -47,12 +87,11 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
   };
 
   const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this task?')) {
-      try {
-        await deleteTask(task.id);
-      } catch (error) {
-        console.error('Failed to delete task:', error);
-      }
+    try {
+      await deleteTask(task.id);
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error('Failed to delete task:', error);
     }
   };
 
@@ -145,6 +184,19 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
                 <CardTitle className="text-sm font-medium break-words">
                   {task.title}
                 </CardTitle>
+                {/* Repository badge from evaluation */}
+                {evaluationLoading ? (
+                  <div className="mt-1">
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                  </div>
+                ) : evaluation?.repository ? (
+                  <div className="mt-1">
+                    <Badge variant="outline" className="text-xs font-normal gap-1">
+                      <GitBranch className="h-3 w-3" />
+                      {evaluation.repository.name}
+                    </Badge>
+                  </div>
+                ) : null}
                 {task.agent_status && (
                   <div className="mt-1">
                     <AgentStatusBadge status={task.agent_status as AgentStatus} />
@@ -170,7 +222,10 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
                     <Edit className="mr-2 h-4 w-4" />
                     Edit
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleDelete}>
+                  <DropdownMenuItem
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                  >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
                   </DropdownMenuItem>
@@ -205,9 +260,33 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
           <DialogHeader>
             <DialogTitle>Agent Executions - {task.title}</DialogTitle>
           </DialogHeader>
-          <AgentExecutionPanel taskId={task.id} />
+          <AgentExecutionPanel
+            taskId={task.id}
+            evaluation={evaluation}
+            onEvaluationUpdate={setEvaluation}
+          />
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{task.title}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

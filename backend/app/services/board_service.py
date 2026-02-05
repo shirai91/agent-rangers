@@ -294,9 +294,21 @@ class BoardService:
         Returns:
             List of tasks
         """
+        from sqlalchemy.orm import noload
+        
+        # Use noload to prevent N+1 queries on relationships
+        # TaskResponse only needs column_id, not full column object
         result = await db.execute(
             select(Task)
             .where(Task.board_id == board_id)
+            .options(
+                noload(Task.board),
+                noload(Task.column),
+                noload(Task.current_execution),
+                noload(Task.executions),
+                noload(Task.activities),
+                noload(Task.agent_outputs),
+            )
             .order_by(Task.column_id, Task.order)
         )
         return list(result.scalars().all())

@@ -34,6 +34,7 @@ class Board(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    working_directory: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     settings: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,

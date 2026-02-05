@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { AgentExecution } from '@/types';
 import { AgentOutputViewer } from './AgentOutputViewer';
+// StreamingOutput removed - Live Update feature disabled
 
 interface ExecutionDetailsProps {
   execution: AgentExecution;
@@ -23,6 +24,7 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
   const [showOutputs, setShowOutputs] = useState(true);
   const [showContext, setShowContext] = useState(false);
   const [showResultSummary, setShowResultSummary] = useState(false);
+  // showStreamingOutput state removed - Live Update feature disabled
 
   const getStatusBadge = () => {
     switch (execution.status) {
@@ -85,7 +87,9 @@ export function ExecutionDetails({ execution }: ExecutionDetailsProps) {
 
   const formatDateTime = (dateString: string | null) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
+    // Ensure UTC timezone if not specified
+    const utcString = dateString.endsWith('Z') || dateString.includes('+') ? dateString : dateString + 'Z';
+    const date = new Date(utcString);
     return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',

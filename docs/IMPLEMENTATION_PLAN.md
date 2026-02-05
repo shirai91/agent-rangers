@@ -752,16 +752,39 @@ Phase 3.1 improves the architecture phase to use Claude CLI instead of direct AP
 
 ---
 
-### Step 3.1.5: Testing & Commit
+### Step 3.1.5: Git-Based File Change Tracking ✅
+**Time:** 2 hours
+
+Track actual file changes made by developer agent using git:
+
+1. `_capture_git_state()` - Captures git status before execution (HEAD, staged, modified, untracked)
+2. `_get_git_changed_files()` - Compares post-execution state via git diff
+3. `_is_git_repo()` - Check if working directory is a git repository
+4. Updated `_run_development_phase()` to use git tracking
+5. Frontend shows Created/Modified files separately with icons
+6. Diff stats displayed when available
+
+**Deliverables:**
+- [x] Git state capture before development phase
+- [x] Git diff comparison after development phase
+- [x] Frontend displays created vs modified files
+- [x] Fallback to file listing for non-git directories
+- [x] Diff stats shown in UI
+
+---
+
+### Step 3.1.6: Testing & Commit
 **Time:** 1 hour
 
 1. Test "Plan Only" (architecture_only) workflow end-to-end
 2. Verify architecture output saved to workspace
 3. Verify file viewing works in UI
+4. Test git change tracking shows actual changes
 
 **Deliverables:**
 - [x] Architecture phase runs with codebase exploration
 - [x] Outputs viewable in UI
+- [x] Git changes tracked accurately
 
 ---
 

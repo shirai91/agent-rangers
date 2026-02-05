@@ -13,6 +13,7 @@ from app.database import init_db, close_db, AsyncSessionLocal
 from app.api import api_router
 from app.api.websocket import manager, router as ws_router
 from app.models.agent_execution import AgentExecution
+from app.services.file_storage import file_storage
 
 
 async def cleanup_stale_executions():
@@ -64,6 +65,10 @@ async def lifespan(app: FastAPI):
     if settings.DEBUG:
         print("Debug mode enabled - initializing database tables...")
         # await init_db()  # Uncomment for development without Alembic
+
+    # Initialize file storage directory structure
+    file_storage.initialize()
+    print(f"File storage initialized at {file_storage.base_dir}")
 
     # Clean up stale executions from previous server instances
     await cleanup_stale_executions()

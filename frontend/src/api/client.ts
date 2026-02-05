@@ -20,6 +20,8 @@ import type {
   AgentExecution,
   StartAgentWorkflowInput,
   ExecutionStatusResponse,
+  Repository,
+  TaskEvaluation,
 } from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -324,6 +326,9 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getTaskPlans: (taskId: string) =>
+    fetchJSON<Array<{ execution_id: string; created_at: string; plan_filename: string | null; plan_preview: string; task_title: string }>>(`/api/agents/tasks/${encodeId(taskId)}/plans`),
+
   getExecution: (executionId: string) =>
     fetchJSON<AgentExecution>(`/api/agents/executions/${encodeId(executionId)}`),
 
@@ -349,4 +354,29 @@ export const api = {
       `/api/agents/boards/${encodeId(boardId)}/executions${queryString ? `?${queryString}` : ''}`
     );
   },
+
+  // Board Settings - Working Directory
+  setWorkingDirectory: (boardId: string, directory: string) =>
+    fetchJSON<Board>(`/api/boards/${encodeId(boardId)}/working-directory`, {
+      method: 'PUT',
+      body: JSON.stringify({ working_directory: directory }),
+    }),
+
+  // Repository Scanning
+  getRepositories: (boardId: string) =>
+    fetchJSON<Repository[]>(`/api/boards/${encodeId(boardId)}/repositories`),
+
+  scanRepositories: (boardId: string) =>
+    fetchJSON<Repository[]>(`/api/boards/${encodeId(boardId)}/repositories/scan`, {
+      method: 'POST',
+    }),
+
+  // Task Evaluation
+  getTaskEvaluation: (taskId: string) =>
+    fetchJSON<TaskEvaluation>(`/api/tasks/${encodeId(taskId)}/evaluation`),
+
+  triggerTaskEvaluation: (taskId: string) =>
+    fetchJSON<TaskEvaluation>(`/api/tasks/${encodeId(taskId)}/evaluation`, {
+      method: 'POST',
+    }),
 };

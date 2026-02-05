@@ -50,7 +50,13 @@ class WorkflowDefinition(Base):
         nullable=False,
         default=dict,
         server_default="{}",
-        doc="Additional workflow settings (e.g., strict mode)",
+        doc="""Additional workflow settings. Supported keys:
+        - strict_mode: bool - Enforce workflow rules strictly
+        - workflow_type: str - Type of workflow trigger:
+            - 'transition': Standard column transition workflow
+            - 'evaluate': Auto-evaluate tasks on creation/update
+            - 'agent': AI agent-triggered workflow
+        """,
     )
     created_at: Mapped[datetime] = mapped_column(
         nullable=False,

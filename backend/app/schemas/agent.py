@@ -18,6 +18,22 @@ class StartAgentWorkflowRequest(BaseModel):
         default=None,
         description="Additional execution context",
     )
+    plan_execution_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of a previous architecture_only execution to use as the plan",
+    )
+
+
+class AvailablePlanResponse(BaseModel):
+    """Schema for an available plan from a previous architecture execution."""
+
+    execution_id: UUID
+    created_at: datetime
+    plan_filename: Optional[str] = None
+    plan_preview: Optional[str] = None  # First 200 chars of plan content
+    task_title: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentOutputResponse(BaseModel):

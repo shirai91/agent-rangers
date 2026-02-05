@@ -9,6 +9,7 @@ import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { WorkflowEditor } from '@/components/WorkflowEditor';
 import { ActivityFeed } from '@/components/ActivityFeed';
 import { ColumnSettingsDialog } from '@/components/ColumnSettingsDialog';
+import { BoardSettingsDialog } from '@/components/BoardSettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,17 +21,28 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity, X } from 'lucide-react';
-import type { Task, Column } from '@/types';
+import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity, X, FolderCog } from 'lucide-react';
+import type { Task, Column, Board as BoardType } from '@/types';
 
 function BoardsListView() {
   const navigate = useNavigate();
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
+  const [boardToDelete, setBoardToDelete] = useState<BoardType | null>(null);
 
   const {
     boards,
@@ -47,14 +59,13 @@ function BoardsListView() {
     navigate(`/boards/${boardId}`);
   };
 
-  const handleDeleteBoard = async (boardId: string) => {
-    if (window.confirm('Are you sure you want to delete this board? All columns and tasks will be deleted.')) {
-      try {
-        await deleteBoard(boardId);
-      } catch (error) {
-        console.error('Failed to delete board:', error);
-        alert('Failed to delete board. Please try again.');
-      }
+  const handleDeleteBoard = async () => {
+    if (!boardToDelete) return;
+    try {
+      await deleteBoard(boardToDelete.id);
+      setBoardToDelete(null);
+    } catch (error) {
+      console.error('Failed to delete board:', error);
     }
   };
 
@@ -141,7 +152,10 @@ function BoardsListView() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleDeleteBoard(board.id)}>
+                          <DropdownMenuItem
+                            onClick={() => setBoardToDelete(board)}
+                            className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                          >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </DropdownMenuItem>
@@ -161,6 +175,26 @@ function BoardsListView() {
         onOpenChange={setCreateBoardOpen}
         onSuccess={() => fetchBoards()}
       />
+
+      <AlertDialog open={!!boardToDelete} onOpenChange={(open) => !open && setBoardToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Board?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{boardToDelete?.name}"? All columns and tasks will be deleted. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDeleteBoard}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -177,11 +211,11 @@ function BoardView() {
   const [activityFeedOpen, setActivityFeedOpen] = useState(false);
   const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
   const [settingsColumn, setSettingsColumn] = useState<Column | null>(null);
+  const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
 
   const {
     currentBoard,
     loading,
-    error,
     fetchBoard,
   } = useBoardStore();
 
@@ -308,6 +342,10 @@ function BoardView() {
               )}
             </div>
             <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setBoardSettingsOpen(true)}>
+                <FolderCog className="mr-2 h-4 w-4" />
+                Settings
+              </Button>
               <Button variant="outline" onClick={() => setActivityFeedOpen(true)}>
                 <Activity className="mr-2 h-4 w-4" />
                 Activity
@@ -361,6 +399,13 @@ function BoardView() {
           setColumnSettingsOpen(open);
           if (!open) setSettingsColumn(null);
         }}
+      />
+
+      {/* Board Settings Dialog */}
+      <BoardSettingsDialog
+        board={currentBoard}
+        open={boardSettingsOpen}
+        onOpenChange={setBoardSettingsOpen}
       />
 
       {/* Workflow Editor Dialog */}

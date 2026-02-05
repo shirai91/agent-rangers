@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -31,10 +32,13 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.models.task import Task
+from app.models.board import Board
 from app.models.agent_execution import AgentExecution
 from app.models.agent_output import AgentOutput
 from app.services.agent_context_builder import AgentContextBuilder
 from app.services.activity_service import ActivityService
+from app.services.file_storage import file_storage
+from app.api.websocket import manager as ws_manager
 from app.services.prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     DEVELOPER_SYSTEM_PROMPT,
@@ -223,6 +227,24 @@ class HybridOrchestrator:
             },
         )
 
+        # Broadcast execution started via WebSocket
+        asyncio.create_task(
+            ws_manager.broadcast(
+                str(execution.board_id),
+                {
+                    "type": "execution_started",
+                    "payload": {
+                        "execution_id": str(execution.id),
+                        "task_id": str(execution.task_id),
+                        "board_id": str(execution.board_id),
+                        "status": execution.status,
+                        "workflow_type": execution.workflow_type,
+                        "current_phase": execution.current_phase,
+                    },
+                },
+            )
+        )
+
         return execution
 
     @staticmethod
@@ -285,16 +307,56 @@ class HybridOrchestrator:
 
         workspace_path = execution.context.get("workspace_path", str(WORKSPACE_BASE / str(task.id)))
         phases = AgentContextBuilder.get_workflow_phases(execution.workflow_type)
+        
+        # Load repository info from info.json and determine effective working directory
+        effective_repo_path = await self._get_effective_working_directory(
+            db, task, execution, workspace_path
+        )
+        
+        # Add repository path to execution context for all phases
+        if effective_repo_path != workspace_path:
+            execution.context["repository_path"] = effective_repo_path
+            logger.info(f"Using repository path: {effective_repo_path}")
 
         try:
             architecture_result = None
             development_result = None
+
+            # Check if a previous plan should be loaded
+            plan_execution_id = execution.context.get("plan_execution_id")
+            if plan_execution_id and "architecture" not in phases:
+                # Load plan from previous execution
+                architecture_result = await self._load_plan_from_execution(
+                    db, plan_execution_id
+                )
+                if architecture_result:
+                    logger.info(f"Loaded plan from execution {plan_execution_id}")
+                else:
+                    logger.warning(f"Could not load plan from execution {plan_execution_id}")
 
             for phase in phases:
                 execution.current_phase = phase
                 if task:
                     task.agent_status = phase
                 await db.flush()
+
+                # Broadcast execution updated via WebSocket (phase changed)
+                asyncio.create_task(
+                    ws_manager.broadcast(
+                        str(execution.board_id),
+                        {
+                            "type": "execution_updated",
+                            "payload": {
+                                "execution_id": str(execution.id),
+                                "task_id": str(execution.task_id),
+                                "board_id": str(execution.board_id),
+                                "status": execution.status,
+                                "current_phase": execution.current_phase,
+                                "iteration": execution.iteration,
+                            },
+                        },
+                    )
+                )
 
                 # Emit phase start activity
                 await self._emit_activity(
@@ -358,6 +420,25 @@ class HybridOrchestrator:
                 {"iterations": execution.iteration}
             )
 
+            # Broadcast execution completed via WebSocket
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    str(execution.board_id),
+                    {
+                        "type": "execution_completed",
+                        "payload": {
+                            "execution_id": str(execution.id),
+                            "task_id": str(execution.task_id),
+                            "board_id": str(execution.board_id),
+                            "status": execution.status,
+                            "current_phase": execution.current_phase,
+                            "iteration": execution.iteration,
+                            "result_summary": execution.result_summary,
+                        },
+                    },
+                )
+            )
+
         except Exception as e:
             logger.error(f"Workflow execution failed: {e}", exc_info=True)
             execution.status = "failed"
@@ -372,6 +453,24 @@ class HybridOrchestrator:
             await self._emit_activity(
                 db, execution, "workflow_failed",
                 {"error": str(e)}
+            )
+
+            # Broadcast execution failed via WebSocket
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    str(execution.board_id),
+                    {
+                        "type": "execution_completed",
+                        "payload": {
+                            "execution_id": str(execution.id),
+                            "task_id": str(execution.task_id),
+                            "board_id": str(execution.board_id),
+                            "status": execution.status,
+                            "current_phase": execution.current_phase,
+                            "error_message": execution.error_message,
+                        },
+                    },
+                )
             )
 
             raise
@@ -402,7 +501,7 @@ class HybridOrchestrator:
         on_output: Optional[Callable[[str, dict], Any]] = None,
     ) -> dict:
         """
-        Run architecture phase using direct Anthropic API.
+        Run architecture phase using Claude CLI for codebase exploration.
 
         Args:
             db: Database session
@@ -417,7 +516,7 @@ class HybridOrchestrator:
         output = AgentOutput(
             execution_id=execution.id,
             task_id=task.id,
-            agent_name="architect",
+            agent_name="planner",
             phase="architecture",
             iteration=execution.iteration,
             status="running",
@@ -427,46 +526,231 @@ class HybridOrchestrator:
         await db.flush()
 
         try:
-            # Build prompts
-            user_prompt = build_architect_prompt(
+            # Determine effective working directory
+            effective_cwd = await self._get_effective_working_directory(
+                db, task, execution, workspace_path
+            )
+
+            # Build architecture prompt for CLI exploration
+            arch_prompt = self._build_cli_architect_prompt(
                 task_title=task.title,
                 task_description=task.description or "",
                 context=execution.context,
             )
 
-            # Make API call
-            result = await self._api_call(
-                system_prompt=ARCHITECT_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
+            if on_output:
+                await on_output("progress", {
+                    "phase": "architecture",
+                    "message": "Starting architecture phase via Claude CLI...",
+                })
+
+            # Execute Claude CLI in the PROJECT directory (so it can explore files)
+            # but we'll save the output to WORKSPACE (to not pollute the project)
+            arch_content = await self._run_claude_cli_simple(
+                prompt=arch_prompt,
+                workspace_path=effective_cwd,  # Run in project dir to explore codebase
                 on_output=on_output,
-                phase="architecture",
             )
 
-            # Save architecture to workspace
-            arch_path = Path(workspace_path) / "ARCHITECTURE.md"
-            arch_path.write_text(result["content"])
+            # Save architecture to WORKSPACE (not project dir)
+            # This prevents dumping temp files into the actual repository
+            short_summary = self._generate_short_filename(task.title)
+            arch_path = Path(workspace_path) / f"plan-{short_summary}.md"
+            arch_path.write_text(arch_content)
 
             output.status = "completed"
             output.completed_at = datetime.utcnow()
-            output.output_content = result["content"]
-            output.output_structured = {"architecture_saved": str(arch_path)}
-            output.tokens_used = result.get("tokens_used")
+            output.output_content = arch_content
+            output.output_structured = {
+                "architecture_saved": str(arch_path),
+                "project_explored": effective_cwd,
+            }
             output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
             output.files_created = [str(arch_path)]
 
             await db.flush()
 
+            if on_output:
+                await on_output("progress", {
+                    "phase": "architecture",
+                    "message": "Architecture phase completed",
+                })
+
             return {
-                "content": result["content"],
+                "content": arch_content,
                 "path": str(arch_path),
             }
 
         except Exception as e:
+            logger.error(f"Architecture phase failed: {e}")
             output.status = "failed"
             output.error_message = str(e)
             output.completed_at = datetime.utcnow()
             await db.flush()
             raise
+
+    async def _run_claude_cli_simple(
+        self,
+        prompt: str,
+        workspace_path: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+        timeout: int = 300,
+    ) -> str:
+        """
+        Run Claude CLI using simple subprocess (no PTY).
+        
+        Uses 'script' command to provide a pseudo-terminal which Claude CLI requires.
+        
+        Args:
+            prompt: The prompt to send to Claude
+            workspace_path: Working directory
+            on_output: Optional progress callback
+            timeout: Timeout in seconds
+            
+        Returns:
+            The CLI output content
+        """
+        claude_path = self._find_claude_cli()
+        if not claude_path:
+            raise RuntimeError("Claude CLI not found")
+
+        logger.info(f"Running Claude CLI in {workspace_path}")
+
+        # Use 'script' to provide PTY - this is more reliable than os.fork/pty
+        # script -q -c 'command' /dev/null runs command with PTY and discards typescript
+        cmd = [
+            "script", "-q", "-c",
+            f"{claude_path} --dangerously-skip-permissions -p {shlex.quote(prompt)} --output-format text",
+            "/dev/null"
+        ]
+
+        env = {
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": settings.CLAUDE_CONFIG_DIR,
+        }
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=workspace_path,
+                env=env,
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+
+            if process.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='replace')
+                logger.error(f"Claude CLI failed with code {process.returncode}: {error_msg}")
+                raise RuntimeError(f"Claude CLI failed: {error_msg}")
+
+            content = stdout.decode('utf-8', errors='replace')
+            
+            # Clean up ANSI escape codes and control characters
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            content = ansi_escape.sub('', content)
+            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+
+            logger.info(f"Claude CLI completed, output length: {len(content)}")
+            return content.strip()
+
+        except asyncio.TimeoutError:
+            logger.error(f"Claude CLI timed out after {timeout}s")
+            raise RuntimeError(f"Claude CLI timed out after {timeout}s")
+    
+    def _generate_short_filename(self, title: str, max_length: int = 30) -> str:
+        """
+        Generate a short filename-safe slug from a title.
+        
+        Args:
+            title: The task title
+            max_length: Maximum length of the slug
+            
+        Returns:
+            A lowercase, hyphenated slug
+        """
+        import re
+        # Convert to lowercase and replace spaces/special chars with hyphens
+        slug = re.sub(r'[^a-zA-Z0-9]+', '-', title.lower())
+        # Remove leading/trailing hyphens
+        slug = slug.strip('-')
+        # Truncate to max length, but don't cut in the middle of a word
+        if len(slug) > max_length:
+            slug = slug[:max_length].rsplit('-', 1)[0]
+        return slug or 'untitled'
+
+    def _build_cli_architect_prompt(
+        self,
+        task_title: str,
+        task_description: str,
+        context: dict = None,
+    ) -> str:
+        """
+        Build a prompt for Claude CLI to explore codebase and create architecture.
+
+        Args:
+            task_title: Title of the task
+            task_description: Full task description
+            context: Optional additional context
+
+        Returns:
+            Formatted prompt for Claude CLI
+        """
+        prompt_parts = [
+            "# Architecture Planning Task",
+            "",
+            f"## Task: {task_title}",
+            "",
+            "## Description",
+            task_description or "No description provided.",
+            "",
+        ]
+
+        if context:
+            if context.get("repository_path"):
+                prompt_parts.extend([
+                    "## Repository",
+                    f"Working in: `{context['repository_path']}`",
+                    "",
+                ])
+            
+            if context.get("technology_stack"):
+                prompt_parts.extend([
+                    "## Known Technologies",
+                    f"{', '.join(context['technology_stack'])}",
+                    "",
+                ])
+
+        prompt_parts.extend([
+            "## Your Task",
+            "",
+            "1. **Explore the codebase** - Read relevant files to understand the project structure, patterns, and conventions",
+            "2. **Analyze requirements** - Break down the task into clear, actionable requirements", 
+            "3. **Create architecture plan** - Output a detailed plan that fits the existing codebase",
+            "",
+            "## Output Requirements",
+            "",
+            "**DO NOT create or modify any files.** Just output your architecture plan as text.",
+            "",
+            "Your output should include:",
+            "- Overview of the solution approach",
+            "- Requirements analysis (functional & non-functional)",
+            "- Component design with clear responsibilities",
+            "- Data model changes (if any)",
+            "- Step-by-step implementation plan",
+            "- Technical decisions and rationale",
+            "",
+            "**Important:** Base your architecture on the ACTUAL codebase structure you discover, not assumptions.",
+            "Read existing code to understand patterns, naming conventions, and project organization.",
+            "",
+            "Start by exploring the project structure and key files, then output your plan.",
+        ])
+
+        return "\n".join(prompt_parts)
 
     async def _run_development_phase(
         self,
@@ -508,29 +792,53 @@ class HybridOrchestrator:
         try:
             architecture_plan = architecture_result.get("content", "") if architecture_result else ""
 
+            # Determine effective working directory (info.json > board > default)
+            effective_cwd = await self._get_effective_working_directory(
+                db, task, execution, workspace_path
+            )
+
+            # Capture git state BEFORE development
+            pre_git_state = self._capture_git_state(effective_cwd)
+            logger.info(f"Pre-development git state: is_repo={pre_git_state.get('is_git_repo')}")
+
             # Build developer prompt
             user_prompt = build_developer_prompt(
                 task_title=task.title,
                 architecture_plan=architecture_plan,
-                workspace_path=workspace_path,
+                workspace_path=effective_cwd,
                 iteration=execution.iteration,
                 feedback=feedback,
             )
 
-            # Execute using CLI
+            # Execute using CLI with effective working directory and streaming support
             result = await self._cli_execute(
                 prompt=user_prompt,
-                workspace_path=workspace_path,
+                workspace_path=effective_cwd,
                 on_output=on_output,
+                execution_id=execution.id,
+                task_id=task.id,
+                board_id=execution.board_id,
             )
 
-            # Gather files created
-            files_created = self._list_workspace_files(workspace_path)
+            # Get ACTUAL files changed via git diff (comparing to pre-state)
+            git_changes = self._get_git_changed_files(effective_cwd, pre_git_state)
+            
+            # Use git-tracked changes if available, otherwise fall back to listing files
+            if git_changes.get("is_git_repo") and not git_changes.get("error"):
+                files_created = git_changes.get("all_changed", [])
+                logger.info(f"Git tracked changes: {len(files_created)} files - created: {len(git_changes.get('created', []))}, modified: {len(git_changes.get('modified', []))}")
+            else:
+                # Fall back to listing workspace files if not a git repo
+                files_created = self._list_workspace_files(effective_cwd)
+                logger.info(f"Non-git fallback: listing {len(files_created)} workspace files")
 
             output.status = "completed"
             output.completed_at = datetime.utcnow()
             output.output_content = result["content"]
-            output.output_structured = result.get("structured")
+            output.output_structured = {
+                **(result.get("structured") or {}),
+                "git_changes": git_changes,  # Store detailed git change info
+            }
             output.tokens_used = result.get("tokens_used")
             output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
             output.files_created = files_created
@@ -540,6 +848,7 @@ class HybridOrchestrator:
             return {
                 "content": result["content"],
                 "files": files_created,
+                "git_changes": git_changes,
             }
 
         except Exception as e:
@@ -660,7 +969,7 @@ class HybridOrchestrator:
         """
         # Map phase to provider role
         role_map = {
-            "architecture": "architect",
+            "architecture": "planner",
             "development": "developer", 
             "review": "reviewer",
         }
@@ -803,17 +1112,26 @@ class HybridOrchestrator:
         prompt: str,
         workspace_path: str,
         on_output: Optional[Callable[[str, dict], Any]] = None,
+        execution_id: Optional[UUID] = None,
+        task_id: Optional[UUID] = None,
+        board_id: Optional[UUID] = None,
     ) -> dict:
         """
-        Execute developer phase using Claude CLI spawning.
+        Execute developer phase using Claude CLI spawning with real-time streaming.
 
         Spawns 'claude --dangerously-skip-permissions -p' subprocess for
         autonomous code generation with file system access.
+
+        Uses --output-format stream-json for structured streaming events
+        that are broadcast via WebSocket in real-time.
 
         Args:
             prompt: The task prompt for the developer
             workspace_path: Directory for file operations
             on_output: Callback for streaming output
+            execution_id: Execution UUID for WebSocket broadcasting
+            task_id: Task UUID for WebSocket broadcasting
+            board_id: Board UUID for WebSocket broadcasting
 
         Returns:
             Result dictionary with content and files
@@ -831,54 +1149,33 @@ class HybridOrchestrator:
             return await self._simulated_cli_execute(prompt, workspace_path, on_output)
 
         try:
-            # Build the command
+            # Build the command with stream-json output format
             cmd = [
                 claude_path,
                 "--dangerously-skip-permissions",
                 "-p", prompt,
+                "--output-format", "stream-json",
             ]
 
-            # Run in workspace directory
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=workspace_path,
+            # Run with PTY for real-time streaming
+            content, structured_events = await self._run_cli_with_streaming_pty(
+                cmd=cmd,
+                workspace_path=workspace_path,
+                on_output=on_output,
+                execution_id=execution_id,
+                task_id=task_id,
+                board_id=board_id,
             )
-
-            # Stream output
-            output_parts = []
-
-            async def read_stream(stream, prefix=""):
-                while True:
-                    line = await stream.readline()
-                    if not line:
-                        break
-                    text = line.decode("utf-8")
-                    output_parts.append(text)
-                    if on_output:
-                        await on_output("chunk", {"text": text, "phase": "development"})
-
-            # Read stdout and stderr concurrently
-            await asyncio.gather(
-                read_stream(process.stdout),
-                read_stream(process.stderr, "[stderr] "),
-            )
-
-            await asyncio.wait_for(process.wait(), timeout=600)  # 10 minute timeout
-
-            content = "".join(output_parts)
 
             if on_output:
                 await on_output("progress", {
                     "phase": "development",
                     "message": "Development phase completed",
-                    "return_code": process.returncode,
                 })
 
             return {
                 "content": content,
-                "structured": {"return_code": process.returncode},
+                "structured": {"events": structured_events},
             }
 
         except asyncio.TimeoutError:
@@ -890,6 +1187,266 @@ class HybridOrchestrator:
         except Exception as e:
             logger.error(f"CLI execution failed: {e}")
             return await self._simulated_cli_execute(prompt, workspace_path, on_output)
+
+    def _detect_milestone(self, text: str) -> str:
+        """
+        Detect milestone from CLI output text using pattern matching.
+
+        Args:
+            text: Text buffer to analyze for milestone patterns
+
+        Returns:
+            Milestone string describing current activity
+        """
+        text_lower = text.lower()
+
+        # Pattern-based milestone detection (order matters - most specific first)
+        if 'read' in text_lower or 'reading' in text_lower:
+            return 'Reading files...'
+        elif 'write' in text_lower or 'writing' in text_lower or 'created' in text_lower:
+            return 'Writing code...'
+        elif 'edit' in text_lower or 'editing' in text_lower:
+            return 'Editing files...'
+        elif 'test' in text_lower:
+            return 'Running tests...'
+        elif 'install' in text_lower or 'npm' in text_lower or 'pip' in text_lower:
+            return 'Installing dependencies...'
+        elif 'think' in text_lower:
+            return 'Thinking...'
+        else:
+            return 'Working...'
+
+    async def _run_cli_with_streaming_pty(
+        self,
+        cmd: list,
+        workspace_path: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+        execution_id: Optional[UUID] = None,
+        task_id: Optional[UUID] = None,
+        board_id: Optional[UUID] = None,
+        timeout: int = 600,
+    ) -> tuple[str, list]:
+        """
+        Run Claude CLI with PTY support and milestone-based progress updates.
+
+        Parses stream-json output format and broadcasts milestone events via WebSocket
+        instead of streaming every single event. Uses batched output processing with
+        pattern-based milestone detection to prevent frontend hanging.
+
+        Args:
+            cmd: Command to execute
+            workspace_path: Working directory
+            on_output: Callback for streaming output
+            execution_id: Execution UUID for WebSocket broadcasting
+            task_id: Task UUID for WebSocket broadcasting
+            board_id: Board UUID for WebSocket broadcasting
+            timeout: Timeout in seconds
+
+        Returns:
+            Tuple of (content, structured_events)
+        """
+        import errno
+        import pty
+        import select
+        import time
+
+        env = {
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": settings.CLAUDE_CONFIG_DIR,
+        }
+
+        output_chunks = []
+        structured_events = []
+        text_content_parts = []
+        json_buffer = ""
+
+        # Milestone tracking
+        output_buffer = ""
+        last_milestone_time = time.time()
+        last_milestone = None
+        milestone_interval = 2.5  # Send milestone updates every 2.5 seconds
+
+        def parse_stream_json_line(line: str) -> Optional[dict]:
+            """Parse a single line of stream-json output."""
+            line = line.strip()
+            if not line:
+                return None
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                return None
+
+        async def broadcast_milestone(milestone: str):
+            """Broadcast milestone update via WebSocket."""
+            if board_id:
+                payload = {
+                    "execution_id": str(execution_id) if execution_id else None,
+                    "task_id": str(task_id) if task_id else None,
+                    "milestone": milestone,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                asyncio.create_task(
+                    ws_manager.broadcast(
+                        str(board_id),
+                        {
+                            "type": "execution_milestone",
+                            "payload": payload,
+                        },
+                    )
+                )
+
+        def process_pty_output(data: bytes):
+            """Process PTY output and extract stream-json events."""
+            nonlocal json_buffer, text_content_parts
+
+            # Decode and clean the output
+            text = data.decode('utf-8', errors='replace')
+
+            # Remove ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            clean_text = ansi_escape.sub('', text)
+
+            # Remove control characters but keep newlines
+            clean_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', clean_text)
+
+            # Buffer and process line by line
+            json_buffer += clean_text
+            lines = json_buffer.split('\n')
+            json_buffer = lines[-1]  # Keep incomplete line in buffer
+
+            for line in lines[:-1]:  # Process complete lines
+                event = parse_stream_json_line(line)
+                if event:
+                    structured_events.append(event)
+
+                    # Extract text content for final output
+                    event_type = event.get("type", "unknown")
+                    if event_type == "assistant" and "message" in event:
+                        msg = event["message"]
+                        if isinstance(msg, dict):
+                            for block in msg.get("content", []):
+                                if block.get("type") == "text":
+                                    content_text = block.get("text", "")
+                                    text_content_parts.append(content_text)
+                    elif event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            content_text = delta.get("text", "")
+                            text_content_parts.append(content_text)
+                    elif event_type == "result":
+                        content_text = event.get("result", "")
+                        if content_text:
+                            text_content_parts.append(content_text)
+
+        logger.info(f"Running CLI with streaming PTY: {cmd[0]}...")
+
+        loop = asyncio.get_event_loop()
+
+        def run_pty_sync():
+            """Synchronous PTY execution in thread pool."""
+            nonlocal output_buffer, last_milestone_time, last_milestone
+
+            master_fd, slave_fd = pty.openpty()
+
+            pid = os.fork()
+
+            if pid == 0:
+                # Child process
+                os.close(master_fd)
+                os.setsid()
+                os.dup2(slave_fd, 0)
+                os.dup2(slave_fd, 1)
+                os.dup2(slave_fd, 2)
+                if slave_fd > 2:
+                    os.close(slave_fd)
+                os.chdir(workspace_path)
+                os.execvpe(cmd[0], cmd, env)
+            else:
+                # Parent process
+                os.close(slave_fd)
+
+                start_time = time.time()
+                milestone_updates = []
+
+                try:
+                    while True:
+                        elapsed = time.time() - start_time
+                        if elapsed > timeout:
+                            os.kill(pid, 9)
+                            raise asyncio.TimeoutError(f"PTY timeout after {timeout}s")
+
+                        try:
+                            r, _, _ = select.select([master_fd], [], [], 0.1)
+                            if master_fd in r:
+                                try:
+                                    data = os.read(master_fd, 4096)
+                                    if not data:
+                                        break
+                                    output_chunks.append(data)
+
+                                    # Add to buffer for milestone detection
+                                    decoded = data.decode('utf-8', errors='replace')
+                                    output_buffer += decoded
+
+                                    # Check if enough time has passed to send milestone update
+                                    current_time = time.time()
+                                    if current_time - last_milestone_time >= milestone_interval:
+                                        # Detect milestone from buffer
+                                        detected_milestone = self._detect_milestone(output_buffer)
+
+                                        # Only send if milestone changed
+                                        if detected_milestone != last_milestone:
+                                            milestone_updates.append(detected_milestone)
+                                            last_milestone = detected_milestone
+
+                                        last_milestone_time = current_time
+                                        # Clear buffer after processing
+                                        output_buffer = ""
+
+                                except OSError as e:
+                                    if e.errno == errno.EIO:
+                                        break
+                                    raise
+                        except select.error:
+                            break
+
+                finally:
+                    os.close(master_fd)
+                    try:
+                        os.waitpid(pid, 0)
+                    except ChildProcessError:
+                        pass
+
+                return milestone_updates
+
+        # Run PTY in executor
+        milestone_updates = await loop.run_in_executor(None, run_pty_sync)
+
+        # Broadcast milestone updates
+        for milestone in milestone_updates:
+            await broadcast_milestone(milestone)
+
+        # Process all chunks to extract structured events
+        for chunk in output_chunks:
+            process_pty_output(chunk)
+
+        # Process any remaining buffer
+        if json_buffer.strip():
+            event = parse_stream_json_line(json_buffer)
+            if event:
+                structured_events.append(event)
+
+        # Combine all text content
+        full_content = "".join(text_content_parts)
+
+        # If no structured text content, fall back to raw output
+        if not full_content:
+            raw_output = b''.join(output_chunks).decode('utf-8', errors='replace')
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            full_content = ansi_escape.sub('', raw_output)
+            full_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', full_content)
+
+        return full_content.strip(), structured_events
 
     async def _apply_review_fixes(
         self,
@@ -1113,14 +1670,148 @@ Created sample implementation at: {sample_file}
 
         return None
 
-    def _list_workspace_files(self, workspace_path: str) -> list:
-        """List all files in workspace."""
+    async def _load_plan_from_execution(
+        self,
+        db: AsyncSession,
+        plan_execution_id: str,
+    ) -> Optional[dict]:
+        """
+        Load a plan from a previous architecture_only execution.
+
+        Args:
+            db: Database session
+            plan_execution_id: UUID of the previous execution
+
+        Returns:
+            Architecture result dict with 'content' key, or None if not found
+        """
+        from uuid import UUID as PyUUID
+        
+        try:
+            exec_uuid = PyUUID(plan_execution_id)
+        except ValueError:
+            logger.error(f"Invalid plan_execution_id: {plan_execution_id}")
+            return None
+
+        # Get the execution
+        result = await db.execute(
+            select(AgentExecution).where(AgentExecution.id == exec_uuid)
+        )
+        execution = result.scalar_one_or_none()
+
+        if not execution:
+            logger.error(f"Plan execution {plan_execution_id} not found")
+            return None
+
+        if execution.workflow_type != "architecture_only":
+            logger.warning(f"Execution {plan_execution_id} is not architecture_only")
+            # Still try to load the plan
+
+        if execution.status != "completed":
+            logger.warning(f"Execution {plan_execution_id} is not completed (status: {execution.status})")
+
+        # Get the architecture output
+        result = await db.execute(
+            select(AgentOutput).where(
+                AgentOutput.execution_id == exec_uuid,
+                AgentOutput.phase == "architecture",
+            )
+        )
+        output = result.scalar_one_or_none()
+
+        if not output or not output.output_content:
+            logger.error(f"No architecture output found for execution {plan_execution_id}")
+            return None
+
+        return {
+            "content": output.output_content,
+            "source_execution_id": plan_execution_id,
+        }
+
+    async def _get_effective_working_directory(
+        self,
+        db: AsyncSession,
+        task: Task,
+        execution: AgentExecution,
+        default_workspace: str,
+    ) -> str:
+        """
+        Determine the effective working directory for agent execution.
+
+        Priority order:
+        1. Repository path from task's info.json (if exists)
+        2. Board's working_directory (if set)
+        3. Default workspace path
+
+        Args:
+            db: Database session
+            task: Task being processed
+            execution: Current execution
+            default_workspace: Default workspace path to fall back to
+
+        Returns:
+            The effective working directory path
+        """
+        # 1. Try to load info.json for the task
+        try:
+            info_content = file_storage.load_output(
+                board_id=str(execution.board_id),
+                task_id=str(task.id),
+                filename="info.json",
+            )
+            if info_content:
+                info_data = json.loads(info_content)
+                # Handle both formats: repository as string or as object with path
+                repository = info_data.get("repository")
+                if isinstance(repository, dict):
+                    repository_path = repository.get("path")
+                else:
+                    repository_path = repository
+                    
+                if repository_path:
+                    repo_path = Path(repository_path)
+                    if repo_path.exists() and repo_path.is_dir():
+                        logger.info(
+                            f"Using repository path from info.json: {repository_path}"
+                        )
+                        return str(repo_path)
+                    else:
+                        logger.warning(
+                            f"Repository path from info.json does not exist: {repository_path}"
+                        )
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"Failed to parse info.json for task {task.id}: {e}")
+        except Exception as e:
+            logger.warning(f"Error loading info.json for task {task.id}: {e}")
+
+        # 2. Try board's working_directory
+        board = await db.get(Board, execution.board_id)
+        if board and board.working_directory:
+            board_dir = Path(board.working_directory)
+            if board_dir.exists() and board_dir.is_dir():
+                logger.info(
+                    f"Using board working_directory: {board.working_directory}"
+                )
+                return str(board_dir)
+            else:
+                logger.warning(
+                    f"Board working_directory does not exist: {board.working_directory}"
+                )
+
+        # 3. Fall back to default workspace
+        logger.info(f"Using default workspace: {default_workspace}")
+        return default_workspace
+
+    def _list_workspace_files(self, workspace_path: str, max_files: int = 100) -> list:
+        """List files in workspace (limited to prevent huge responses)."""
         files = []
         workspace = Path(workspace_path)
         if workspace.exists():
             for path in workspace.rglob("*"):
                 if path.is_file() and not path.name.startswith("."):
                     files.append(str(path.relative_to(workspace)))
+                    if len(files) >= max_files:
+                        break  # Limit to prevent scanning huge directories
         return files
 
     def _read_workspace_files(self, workspace_path: str, max_files: int = 20) -> list:
@@ -1162,6 +1853,179 @@ Created sample implementation at: {sample_file}
             ".java": "java",
         }
         return mapping.get(ext, "")
+
+    def _is_git_repo(self, path: str) -> bool:
+        """Check if the path is inside a git repository."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except Exception as e:
+            logger.debug(f"Git check failed for {path}: {e}")
+            return False
+
+    def _capture_git_state(self, path: str) -> dict:
+        """
+        Capture git state before agent execution.
+        
+        Returns:
+            dict with 'is_git_repo', 'head_commit', 'staged_files', 'modified_files'
+        """
+        if not self._is_git_repo(path):
+            return {"is_git_repo": False}
+        
+        try:
+            # Get current HEAD commit
+            head_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            head_commit = head_result.stdout.strip() if head_result.returncode == 0 else None
+            
+            # Get list of modified files (unstaged)
+            modified_result = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            modified_files = modified_result.stdout.strip().split("\n") if modified_result.stdout.strip() else []
+            
+            # Get list of staged files
+            staged_result = subprocess.run(
+                ["git", "diff", "--name-only", "--cached"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            staged_files = staged_result.stdout.strip().split("\n") if staged_result.stdout.strip() else []
+            
+            # Get untracked files
+            untracked_result = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            untracked_files = untracked_result.stdout.strip().split("\n") if untracked_result.stdout.strip() else []
+            
+            return {
+                "is_git_repo": True,
+                "head_commit": head_commit,
+                "staged_files": staged_files,
+                "modified_files": modified_files,
+                "untracked_files": untracked_files,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to capture git state for {path}: {e}")
+            return {"is_git_repo": True, "error": str(e)}
+
+    def _get_git_changed_files(self, path: str, pre_state: dict) -> dict:
+        """
+        Get files changed by comparing current state to pre-execution state.
+        
+        Args:
+            path: Working directory path
+            pre_state: State captured before execution via _capture_git_state()
+            
+        Returns:
+            dict with 'created', 'modified', 'deleted' file lists
+        """
+        if not pre_state.get("is_git_repo"):
+            # Fall back to listing workspace files if not a git repo
+            return {
+                "created": self._list_workspace_files(path),
+                "modified": [],
+                "deleted": [],
+                "is_git_repo": False,
+            }
+        
+        try:
+            # Get current modified files (unstaged)
+            modified_result = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            current_modified = set(modified_result.stdout.strip().split("\n")) if modified_result.stdout.strip() else set()
+            
+            # Get current staged files
+            staged_result = subprocess.run(
+                ["git", "diff", "--name-only", "--cached"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            current_staged = set(staged_result.stdout.strip().split("\n")) if staged_result.stdout.strip() else set()
+            
+            # Get current untracked files
+            untracked_result = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            current_untracked = set(untracked_result.stdout.strip().split("\n")) if untracked_result.stdout.strip() else set()
+            
+            # Calculate changes
+            pre_modified = set(pre_state.get("modified_files", []))
+            pre_staged = set(pre_state.get("staged_files", []))
+            pre_untracked = set(pre_state.get("untracked_files", []))
+            
+            # New files = untracked now but weren't before
+            created = list(current_untracked - pre_untracked)
+            
+            # Modified files = modified/staged now but weren't before (excluding newly created)
+            all_current_changes = current_modified | current_staged
+            all_pre_changes = pre_modified | pre_staged
+            modified = list((all_current_changes - all_pre_changes) - current_untracked)
+            
+            # Get detailed diff stats for modified files
+            diff_stats = []
+            if modified or created:
+                # Get diff stats for all changed files
+                stats_result = subprocess.run(
+                    ["git", "diff", "--stat", "--no-color"],
+                    cwd=path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if stats_result.returncode == 0:
+                    diff_stats = stats_result.stdout.strip().split("\n")
+            
+            return {
+                "created": sorted(created),
+                "modified": sorted(modified),
+                "deleted": [],  # Would need to track this differently
+                "all_changed": sorted(set(created + modified)),
+                "diff_stats": diff_stats,
+                "is_git_repo": True,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get git changes for {path}: {e}")
+            return {
+                "created": self._list_workspace_files(path),
+                "modified": [],
+                "deleted": [],
+                "is_git_repo": True,
+                "error": str(e),
+            }
 
     def _parse_review_result(self, content: str) -> dict:
         """Parse review result from content."""
@@ -1266,9 +2130,20 @@ Created sample implementation at: {sample_file}
         limit: int = 10,
     ) -> list[AgentExecution]:
         """Get executions for a task."""
+        from sqlalchemy.orm import noload, selectinload, load_only
+        from app.models.agent_output import AgentOutput
+        
         result = await db.execute(
             select(AgentExecution)
-            .options(selectinload(AgentExecution.outputs))
+            .options(
+                noload(AgentExecution.task),
+                noload(AgentExecution.board),
+                # Load outputs but prevent their nested relationships from loading
+                selectinload(AgentExecution.outputs).options(
+                    noload(AgentOutput.execution),
+                    noload(AgentOutput.task),
+                ),
+            )
             .where(AgentExecution.task_id == task_id)
             .order_by(AgentExecution.created_at.desc())
             .limit(limit)
@@ -1283,9 +2158,15 @@ Created sample implementation at: {sample_file}
         limit: int = 20,
     ) -> list[AgentExecution]:
         """Get executions for a board."""
+        from sqlalchemy.orm import noload
+        
         query = (
             select(AgentExecution)
-            .options(selectinload(AgentExecution.outputs))
+            .options(
+                noload(AgentExecution.task),
+                noload(AgentExecution.board),
+                noload(AgentExecution.outputs),
+            )
             .where(AgentExecution.board_id == board_id)
         )
 

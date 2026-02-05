@@ -2,8 +2,17 @@ export interface Board {
   id: string;
   name: string;
   description: string | null;
+  working_directory?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Repository {
+  name: string;
+  path: string;
+  remote_url: string | null;
+  primary_language: string | null;
+  file_counts: Record<string, number>;
 }
 
 export interface Column {
@@ -74,6 +83,60 @@ export interface MoveTaskInput {
   version: number;
 }
 
+export interface ExecutionStartedPayload {
+  execution_id: string;
+  task_id: string;
+  board_id: string;
+  status: string;
+  workflow_type: string;
+  current_phase: string | null;
+}
+
+export interface ExecutionUpdatedPayload {
+  execution_id: string;
+  task_id: string;
+  board_id: string;
+  status: string;
+  current_phase: string | null;
+  iteration: number;
+}
+
+export interface ExecutionCompletedPayload {
+  execution_id: string;
+  task_id: string;
+  board_id: string;
+  status: string;
+  current_phase: string | null;
+  iteration?: number;
+  result_summary?: Record<string, unknown> | null;
+  error_message?: string | null;
+}
+
+// @deprecated Use ExecutionMilestonePayload instead
+export interface ExecutionProgressPayload {
+  execution_id: string | null;
+  task_id: string | null;
+  board_id: string;
+  content: string;
+  event_type: string;
+  timestamp: string;
+  raw_event?: Record<string, unknown> | null;
+}
+
+// @deprecated Kept for backward compatibility
+export interface StreamingChunk {
+  content: string;
+  event_type: string;
+  timestamp: string;
+}
+
+export interface ExecutionMilestonePayload {
+  execution_id: string;
+  task_id: string;
+  milestone: string;
+  timestamp: string;
+}
+
 export type WSEvent =
   | { type: 'task_created'; data: Task }
   | { type: 'task_updated'; data: Task }
@@ -85,7 +148,11 @@ export type WSEvent =
   | { type: 'agent_started'; data: AgentExecution }
   | { type: 'agent_phase_completed'; data: AgentOutput }
   | { type: 'agent_completed'; data: AgentExecution }
-  | { type: 'agent_failed'; data: AgentExecution };
+  | { type: 'agent_failed'; data: AgentExecution }
+  | { type: 'execution_started'; data?: ExecutionStartedPayload; payload?: ExecutionStartedPayload }
+  | { type: 'execution_updated'; data?: ExecutionUpdatedPayload; payload?: ExecutionUpdatedPayload }
+  | { type: 'execution_completed'; data?: ExecutionCompletedPayload; payload?: ExecutionCompletedPayload }
+  | { type: 'execution_milestone'; data?: ExecutionMilestonePayload; payload?: ExecutionMilestonePayload };
 
 // Workflow Types
 export interface WorkflowDefinition {
@@ -250,6 +317,15 @@ export interface AgentExecution {
 export interface StartAgentWorkflowInput {
   workflow_type: WorkflowType;
   context?: Record<string, unknown>;
+  plan_execution_id?: string;
+}
+
+export interface AvailablePlan {
+  execution_id: string;
+  created_at: string;
+  plan_filename: string | null;
+  plan_preview: string;
+  task_title: string;
 }
 
 export interface OutputSummary {
@@ -274,4 +350,24 @@ export interface ExecutionStatusResponse {
   completed_at: string | null;
   error_message: string | null;
   outputs: OutputSummary[];
+}
+
+// Task Evaluation Types
+export interface RepositoryMatch {
+  path: string;
+  name: string;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface EvaluationContext {
+  relevant_files: string[];
+  technologies: string[];
+}
+
+export interface TaskEvaluation {
+  task_id: string;
+  evaluated_at: string;
+  repository: RepositoryMatch | null;
+  context: EvaluationContext;
 }

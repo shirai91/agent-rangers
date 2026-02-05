@@ -69,13 +69,18 @@ async def start_agent_workflow(
             detail=f"Invalid workflow_type. Must be one of: {', '.join(valid_workflows)}",
         )
 
+    # Build context with plan_execution_id if provided
+    context = request_data.context or {}
+    if request_data.plan_execution_id:
+        context["plan_execution_id"] = str(request_data.plan_execution_id)
+    
     # Create execution
     execution = await AgentOrchestrator.create_execution(
         db=db,
         task_id=task_id,
         board_id=task.board_id,
         workflow_type=request_data.workflow_type,
-        context=request_data.context,
+        context=context,
     )
     await db.commit()
     await db.refresh(execution)
@@ -228,7 +233,97 @@ async def get_task_executions(
     executions = await AgentOrchestrator.get_task_executions(
         db, task_id, limit=limit
     )
+    
+    # Sanitize response to prevent huge payloads
+    for execution in executions:
+        # Truncate files_affected in result_summary
+        if execution.result_summary and 'files_affected' in execution.result_summary:
+            files = execution.result_summary['files_affected']
+            if isinstance(files, list) and len(files) > 50:
+                execution.result_summary['files_affected'] = files[:50] + [f'... and {len(files) - 50} more files']
+        # Truncate output content (keep metadata but limit content size)
+        for output in execution.outputs:
+            if output.output_content and len(output.output_content) > 5000:
+                output.output_content = output.output_content[:5000] + '\n\n... [truncated]'
+            # Limit files_created
+            if output.files_created and len(output.files_created) > 50:
+                output.files_created = output.files_created[:50]
+    
     return executions
+
+
+@router.get(
+    "/tasks/{task_id}/plans",
+)
+async def get_task_plans(
+    task_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get available plans (completed architecture_only executions) for a task.
+
+    Args:
+        task_id: Task UUID
+
+    Returns:
+        List of available plans that can be selected for development
+    """
+    from sqlalchemy import select
+    from app.models.agent_execution import AgentExecution
+    from app.models.agent_output import AgentOutput
+    from app.models.task import Task
+    
+    # Get task title
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+    
+    # Get completed architecture_only executions
+    result = await db.execute(
+        select(AgentExecution)
+        .where(
+            AgentExecution.task_id == task_id,
+            AgentExecution.workflow_type == "architecture_only",
+            AgentExecution.status == "completed",
+        )
+        .order_by(AgentExecution.created_at.desc())
+    )
+    executions = result.scalars().all()
+    
+    plans = []
+    for execution in executions:
+        # Get the architecture output for this execution
+        output_result = await db.execute(
+            select(AgentOutput)
+            .where(
+                AgentOutput.execution_id == execution.id,
+                AgentOutput.phase == "architecture",
+                AgentOutput.status == "completed",
+            )
+        )
+        output = output_result.scalar_one_or_none()
+        
+        if output and output.output_content:
+            # Extract plan filename from files_created
+            plan_filename = None
+            if output.files_created:
+                for f in output.files_created:
+                    if isinstance(f, str) and f.endswith('.md'):
+                        plan_filename = f.split('/')[-1]
+                        break
+            
+            plans.append({
+                "execution_id": str(execution.id),
+                "created_at": execution.created_at.isoformat(),
+                "plan_filename": plan_filename,
+                "plan_preview": output.output_content[:200] + "..." if len(output.output_content) > 200 else output.output_content,
+                "task_title": task.title,
+            })
+    
+    return plans
 
 
 @router.get(
@@ -597,3 +692,135 @@ async def get_workspace_file_raw(
     except UnicodeDecodeError:
         # Binary file
         return FileResponse(full_path, filename=os.path.basename(file_path))
+
+
+# ============================================================================
+# Absolute File Path Endpoints (for project files outside workspaces)
+# ============================================================================
+
+# Allowed base paths for file reading (security)
+ALLOWED_FILE_PATHS = [
+    "/home/shirai91/projects/",
+    "/tmp/workspaces/",
+]
+
+
+def is_path_allowed(file_path: str) -> bool:
+    """Check if the file path is within allowed directories."""
+    import os
+    abs_path = os.path.abspath(file_path)
+    return any(abs_path.startswith(allowed) for allowed in ALLOWED_FILE_PATHS)
+
+
+@router.get("/files/read")
+async def read_file_by_path(path: str):
+    """
+    Read a file from an absolute path.
+    
+    Limited to allowed directories for security.
+    
+    Args:
+        path: Absolute file path
+        
+    Returns:
+        File content as JSON
+    """
+    import os
+    
+    if not is_path_allowed(path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="File path not in allowed directories",
+        )
+    
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {path}",
+        )
+    
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is not a file",
+        )
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"path": path, "content": content}
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is not a text file",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read file: {str(e)}",
+        )
+
+
+@router.get("/files/raw")
+async def get_raw_file_by_path(path: str):
+    """
+    Get raw file content for direct viewing in browser.
+    
+    Limited to allowed directories for security.
+    
+    Args:
+        path: Absolute file path
+        
+    Returns:
+        Raw file content with appropriate content type
+    """
+    import os
+    from fastapi.responses import Response, FileResponse
+    
+    if not is_path_allowed(path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="File path not in allowed directories",
+        )
+    
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {path}",
+        )
+    
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is not a file",
+        )
+    
+    # Determine content type
+    extension = os.path.splitext(path)[1].lower()
+    content_types = {
+        ".md": "text/markdown; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".py": "text/plain; charset=utf-8",
+        ".js": "text/plain; charset=utf-8",
+        ".ts": "text/plain; charset=utf-8",
+        ".tsx": "text/plain; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".yaml": "text/plain; charset=utf-8",
+        ".yml": "text/plain; charset=utf-8",
+    }
+    content_type = content_types.get(extension, "text/plain; charset=utf-8")
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{os.path.basename(path)}"',
+            },
+        )
+    except UnicodeDecodeError:
+        return FileResponse(path, filename=os.path.basename(path))

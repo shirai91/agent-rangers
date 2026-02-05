@@ -15,17 +15,86 @@ import {
   XCircle,
   Clock,
   FileCode,
+  FilePlus,
+  FileEdit,
   Cpu,
   Eye,
   ExternalLink,
   Loader2,
+  GitBranch,
 } from 'lucide-react';
 import type { AgentOutput } from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+interface GitChanges {
+  created: string[];
+  modified: string[];
+  deleted: string[];
+  all_changed: string[];
+  diff_stats: string[];
+  is_git_repo: boolean;
+  error?: string;
+}
+
 interface AgentOutputViewerProps {
   output: AgentOutput;
+}
+
+interface FileRowProps {
+  filePath: string;
+  variant: 'created' | 'modified' | 'default';
+  onView: () => void;
+  rawUrl: string;
+}
+
+function FileRow({ filePath, variant, onView, rawUrl }: FileRowProps) {
+  const fileName = filePath.split('/').pop() || filePath;
+  
+  const iconColor = {
+    created: 'text-green-600',
+    modified: 'text-yellow-600',
+    default: 'text-muted-foreground',
+  }[variant];
+
+  const Icon = variant === 'created' ? FilePlus : variant === 'modified' ? FileEdit : FileCode;
+
+  return (
+    <div className="p-2 bg-muted rounded-md flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <Icon className={`h-4 w-4 flex-shrink-0 ${iconColor}`} />
+        <span className="text-xs font-mono truncate" title={filePath}>
+          {fileName}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          onClick={onView}
+        >
+          <Eye className="h-3 w-3 mr-1" />
+          View
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          asChild
+        >
+          <a
+            href={rawUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="h-3 w-3 mr-1" />
+            Raw
+          </a>
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
@@ -37,36 +106,50 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
 
+  // Check if path is a workspace path or absolute project path
+  const isWorkspacePath = (filePath: string): boolean => {
+    return filePath.includes('/tmp/workspaces/');
+  };
+
   // Extract task_id from file path (format: /tmp/workspaces/{task_id}/...)
   const extractTaskId = (filePath: string): string | null => {
     const match = filePath.match(/\/tmp\/workspaces\/([^\/]+)/);
-    return match ? match[1] : null;
+    return match?.[1] ?? null;
   };
 
   // Extract relative path from full path
   const extractRelativePath = (filePath: string): string => {
     const match = filePath.match(/\/tmp\/workspaces\/[^\/]+\/(.+)/);
-    return match ? match[1] : filePath;
+    return match?.[1] ?? filePath;
   };
 
   // Load file content
   const loadFileContent = async (filePath: string) => {
-    const taskId = extractTaskId(filePath);
-    const relativePath = extractRelativePath(filePath);
-    
-    if (!taskId) {
-      setFileError('Could not extract task ID from file path');
-      return;
-    }
-
     setFileLoading(true);
     setFileError(null);
     setViewingFile(filePath);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/agents/workspaces/${taskId}/files/${relativePath}`
-      );
+      let response: Response;
+      
+      if (isWorkspacePath(filePath)) {
+        // Old workspace path format
+        const taskId = extractTaskId(filePath);
+        const relativePath = extractRelativePath(filePath);
+        
+        if (!taskId) {
+          throw new Error('Could not extract task ID from file path');
+        }
+        
+        response = await fetch(
+          `${API_URL}/api/agents/workspaces/${taskId}/files/${relativePath}`
+        );
+      } else {
+        // Absolute project path - use new endpoint
+        response = await fetch(
+          `${API_URL}/api/agents/files/read?path=${encodeURIComponent(filePath)}`
+        );
+      }
       
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`);
@@ -83,9 +166,13 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
 
   // Get raw file URL for direct viewing in browser
   const getRawFileUrl = (filePath: string): string => {
-    const taskId = extractTaskId(filePath);
-    const relativePath = extractRelativePath(filePath);
-    return `${API_URL}/api/agents/workspaces/${taskId}/raw/${relativePath}`;
+    if (isWorkspacePath(filePath)) {
+      const taskId = extractTaskId(filePath);
+      const relativePath = extractRelativePath(filePath);
+      return `${API_URL}/api/agents/workspaces/${taskId}/raw/${relativePath}`;
+    } else {
+      return `${API_URL}/api/agents/files/raw?path=${encodeURIComponent(filePath)}`;
+    }
   };
 
   const getStatusBadge = () => {
@@ -327,78 +414,128 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
           </div>
         )}
 
-        {/* Files created - collapsible */}
-        {output.files_created && Array.isArray(output.files_created) && output.files_created.length > 0 && (
-          <div className="border rounded-md">
-            <button
-              onClick={() => setShowFiles(!showFiles)}
-              className="w-full px-3 py-2 flex items-center justify-between hover:bg-muted/50 transition-colors"
-            >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                {showFiles ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-                <FileCode className="h-4 w-4" />
-                Files Created
-              </div>
-              <Badge variant="secondary" className="text-xs">
-                {output.files_created.length} files
-              </Badge>
-            </button>
-            {showFiles && (
-              <div className="px-3 pb-3 pt-1">
-                <div className="space-y-2">
-                  {output.files_created.map((file, index) => {
-                    const filePath = typeof file === 'string' ? file : JSON.stringify(file);
-                    const fileName = filePath.split('/').pop() || filePath;
-                    
-                    return (
-                      <div
-                        key={index}
-                        className="p-2 bg-muted rounded-md flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <FileCode className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          <span className="text-xs font-mono truncate" title={filePath}>
-                            {fileName}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2"
-                            onClick={() => loadFileContent(filePath)}
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2"
-                            asChild
-                          >
-                            <a
-                              href={getRawFileUrl(filePath)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Raw
-                            </a>
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
+        {/* Files Changed - collapsible (with git tracking support) */}
+        {(() => {
+          const gitChanges = output.output_structured?.git_changes as GitChanges | undefined;
+          const hasGitChanges = gitChanges?.is_git_repo && !gitChanges?.error;
+          const filesCreated = output.files_created || [];
+          const totalFiles = hasGitChanges 
+            ? (gitChanges.created?.length || 0) + (gitChanges.modified?.length || 0)
+            : filesCreated.length;
+          
+          if (totalFiles === 0) return null;
+
+          return (
+            <div className="border rounded-md">
+              <button
+                onClick={() => setShowFiles(!showFiles)}
+                className="w-full px-3 py-2 flex items-center justify-between hover:bg-muted/50 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {showFiles ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  {hasGitChanges ? (
+                    <GitBranch className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <FileCode className="h-4 w-4" />
+                  )}
+                  Files Changed
+                  {hasGitChanges && (
+                    <Badge variant="outline" className="text-xs ml-1 text-green-600 border-green-600">
+                      git tracked
+                    </Badge>
+                  )}
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+                <Badge variant="secondary" className="text-xs">
+                  {totalFiles} files
+                </Badge>
+              </button>
+              {showFiles && (
+                <div className="px-3 pb-3 pt-1">
+                  <div className="space-y-3">
+                    {/* Git-tracked changes */}
+                    {hasGitChanges ? (
+                      <>
+                        {/* Created files */}
+                        {gitChanges.created && gitChanges.created.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-2 text-xs font-medium text-green-600">
+                              <FilePlus className="h-3 w-3" />
+                              Created ({gitChanges.created.length})
+                            </div>
+                            <div className="space-y-1">
+                              {gitChanges.created.map((file, index) => (
+                                <FileRow 
+                                  key={`created-${index}`}
+                                  filePath={file}
+                                  variant="created"
+                                  onView={() => loadFileContent(file)}
+                                  rawUrl={getRawFileUrl(file)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Modified files */}
+                        {gitChanges.modified && gitChanges.modified.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-2 text-xs font-medium text-yellow-600">
+                              <FileEdit className="h-3 w-3" />
+                              Modified ({gitChanges.modified.length})
+                            </div>
+                            <div className="space-y-1">
+                              {gitChanges.modified.map((file, index) => (
+                                <FileRow 
+                                  key={`modified-${index}`}
+                                  filePath={file}
+                                  variant="modified"
+                                  onView={() => loadFileContent(file)}
+                                  rawUrl={getRawFileUrl(file)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Diff stats */}
+                        {gitChanges.diff_stats && gitChanges.diff_stats.length > 0 && (
+                          <div className="mt-3 pt-3 border-t">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">
+                              Diff Summary
+                            </div>
+                            <pre className="text-xs font-mono bg-muted p-2 rounded overflow-x-auto">
+                              {gitChanges.diff_stats.join('\n')}
+                            </pre>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Fallback: non-git tracked files */
+                      <div className="space-y-1">
+                        {filesCreated.map((file, index) => {
+                          const filePath = typeof file === 'string' ? file : JSON.stringify(file);
+                          return (
+                            <FileRow 
+                              key={index}
+                              filePath={filePath}
+                              variant="default"
+                              onView={() => loadFileContent(filePath)}
+                              rawUrl={getRawFileUrl(filePath)}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* File Viewer Dialog */}
         <Dialog open={viewingFile !== null} onOpenChange={() => {

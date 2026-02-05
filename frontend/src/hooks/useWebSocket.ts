@@ -20,6 +20,10 @@ export function useWebSocket(boardId: string | null) {
   const handleColumnCreated = useBoardStore((state) => state.handleColumnCreated);
   const handleColumnUpdated = useBoardStore((state) => state.handleColumnUpdated);
   const handleColumnDeleted = useBoardStore((state) => state.handleColumnDeleted);
+  const handleExecutionStarted = useBoardStore((state) => state.handleExecutionStarted);
+  const handleExecutionUpdated = useBoardStore((state) => state.handleExecutionUpdated);
+  const handleExecutionCompleted = useBoardStore((state) => state.handleExecutionCompleted);
+  const handleExecutionMilestone = useBoardStore((state) => state.handleExecutionMilestone);
 
   // Validate boardId format (basic UUID validation)
   const isValidBoardId = useCallback((id: string): boolean => {
@@ -62,6 +66,26 @@ export function useWebSocket(boardId: string | null) {
         case 'column_deleted':
           handleColumnDeleted(message.data.column_id);
           break;
+        case 'execution_started': {
+          const startedData = message.data ?? message.payload;
+          if (startedData) handleExecutionStarted(startedData);
+          break;
+        }
+        case 'execution_updated': {
+          const updatedData = message.data ?? message.payload;
+          if (updatedData) handleExecutionUpdated(updatedData);
+          break;
+        }
+        case 'execution_completed': {
+          const completedData = message.data ?? message.payload;
+          if (completedData) handleExecutionCompleted(completedData);
+          break;
+        }
+        case 'execution_milestone': {
+          const milestoneData = message.data ?? message.payload;
+          if (milestoneData) handleExecutionMilestone(milestoneData);
+          break;
+        }
         default:
           console.warn('Unknown WebSocket message type:', message);
       }
@@ -76,6 +100,10 @@ export function useWebSocket(boardId: string | null) {
     handleColumnCreated,
     handleColumnUpdated,
     handleColumnDeleted,
+    handleExecutionStarted,
+    handleExecutionUpdated,
+    handleExecutionCompleted,
+    handleExecutionMilestone,
   ]);
 
   useEffect(() => {

@@ -14,6 +14,10 @@ import type {
   UpdateColumnInput,
   AgentExecution,
   WorkflowType,
+  ExecutionStartedPayload,
+  ExecutionUpdatedPayload,
+  ExecutionCompletedPayload,
+  ExecutionMilestonePayload,
 } from '@/types';
 import { api, ApiError, NetworkError } from '@/api/client';
 
@@ -55,11 +59,15 @@ interface BoardState {
   currentExecution: AgentExecution | null;
   executionLoading: boolean;
 
+  // Execution milestone state (per execution)
+  executionMilestones: Record<string, string>;
+
   // Actions
   fetchBoards: () => Promise<void>;
   fetchBoard: (id: string) => Promise<void>;
   createBoard: (data: CreateBoardInput) => Promise<Board>;
   deleteBoard: (id: string) => Promise<void>;
+  setCurrentBoard: (board: Board) => void;
 
   createColumn: (boardId: string, data: CreateColumnInput) => Promise<Column>;
   updateColumn: (id: string, data: { name: string }) => Promise<Column>;
@@ -81,7 +89,7 @@ interface BoardState {
   fetchTaskActivities: (taskId: string) => Promise<TaskActivity[]>;
 
   // Agent execution actions
-  startAgentWorkflow: (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>) => Promise<AgentExecution>;
+  startAgentWorkflow: (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>, planExecutionId?: string) => Promise<AgentExecution>;
   fetchTaskExecutions: (taskId: string) => Promise<AgentExecution[]>;
   fetchBoardExecutions: (boardId: string, statusFilter?: string) => Promise<void>;
   cancelExecution: (executionId: string) => Promise<void>;
@@ -105,6 +113,12 @@ interface BoardState {
   handleAgentPhaseCompleted: (data: { execution_id: string; phase: string }) => void;
   handleAgentCompleted: (data: { task_id: string; execution_id: string }) => void;
   handleAgentFailed: (data: { task_id: string; error: string }) => void;
+  handleExecutionStarted: (data: ExecutionStartedPayload) => void;
+  handleExecutionUpdated: (data: ExecutionUpdatedPayload) => void;
+  handleExecutionCompleted: (data: ExecutionCompletedPayload) => void;
+  handleExecutionMilestone: (data: ExecutionMilestonePayload) => void;
+  clearMilestone: (executionId: string) => void;
+  getMilestone: (executionId: string) => string | undefined;
 
   // Reset
   reset: () => void;
@@ -131,6 +145,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   executions: [],
   currentExecution: null,
   executionLoading: false,
+
+  // Execution milestone state
+  executionMilestones: {},
 
   fetchBoards: async () => {
     set({ loading: true, error: null });
@@ -201,6 +218,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       set({ error: getErrorMessage(error), loading: false });
       throw error;
     }
+  },
+
+  setCurrentBoard: (board: Board) => {
+    set((state) => ({
+      currentBoard: board,
+      boards: state.boards.map((b) => (b.id === board.id ? board : b)),
+    }));
   },
 
   createColumn: async (boardId: string, data: CreateColumnInput) => {
@@ -380,12 +404,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   // Agent execution actions
-  startAgentWorkflow: async (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>) => {
+  startAgentWorkflow: async (taskId: string, workflowType: WorkflowType, context?: Record<string, unknown>, planExecutionId?: string) => {
     set({ executionLoading: true, error: null });
     try {
       const execution = await api.startAgentWorkflow(taskId, {
         workflow_type: workflowType,
         context,
+        plan_execution_id: planExecutionId,
       });
       set((state) => ({
         executions: [execution, ...state.executions],
@@ -606,6 +631,149 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       });
   },
 
+  handleExecutionStarted: (data: ExecutionStartedPayload) => {
+    // Fetch the full execution details and add/update in store
+    api.getExecution(data.execution_id)
+      .then((execution) => {
+        set((state) => {
+          const exists = state.executions.some((e) => e.id === execution.id);
+          if (exists) {
+            return {
+              executions: state.executions.map((e) =>
+                e.id === execution.id ? execution : e
+              ),
+              currentExecution:
+                state.currentExecution?.id === execution.id
+                  ? execution
+                  : state.currentExecution,
+            };
+          }
+          return {
+            executions: [execution, ...state.executions],
+            currentExecution: execution,
+          };
+        });
+      })
+      .catch(() => {
+        // Silently handle error - execution will be fetched later
+      });
+
+    // Update task agent status
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === data.task_id
+          ? { ...t, agent_status: data.status, current_execution_id: data.execution_id }
+          : t
+      ),
+    }));
+  },
+
+  handleExecutionUpdated: (data: ExecutionUpdatedPayload) => {
+    // Update execution in the list with partial data
+    set((state) => ({
+      executions: state.executions.map((e) =>
+        e.id === data.execution_id
+          ? {
+              ...e,
+              status: data.status,
+              current_phase: data.current_phase,
+              iteration: data.iteration,
+            }
+          : e
+      ),
+      currentExecution:
+        state.currentExecution?.id === data.execution_id
+          ? {
+              ...state.currentExecution,
+              status: data.status,
+              current_phase: data.current_phase,
+              iteration: data.iteration,
+            }
+          : state.currentExecution,
+      // Also update task agent status
+      tasks: state.tasks.map((t) =>
+        t.id === data.task_id
+          ? { ...t, agent_status: data.current_phase || data.status }
+          : t
+      ),
+    }));
+  },
+
+  handleExecutionCompleted: (data: ExecutionCompletedPayload) => {
+    // Update execution in the list
+    set((state) => ({
+      executions: state.executions.map((e) =>
+        e.id === data.execution_id
+          ? {
+              ...e,
+              status: data.status,
+              current_phase: data.current_phase,
+              iteration: data.iteration ?? e.iteration,
+              result_summary: data.result_summary ?? e.result_summary,
+              error_message: data.error_message ?? e.error_message,
+            }
+          : e
+      ),
+      currentExecution:
+        state.currentExecution?.id === data.execution_id
+          ? {
+              ...state.currentExecution,
+              status: data.status,
+              current_phase: data.current_phase,
+              iteration: data.iteration ?? state.currentExecution.iteration,
+              result_summary: data.result_summary ?? state.currentExecution.result_summary,
+              error_message: data.error_message ?? state.currentExecution.error_message,
+            }
+          : state.currentExecution,
+      // Update task agent status
+      tasks: state.tasks.map((t) =>
+        t.id === data.task_id
+          ? { ...t, agent_status: data.status }
+          : t
+      ),
+    }));
+
+    // Fetch full execution details to ensure we have complete data
+    api.getExecution(data.execution_id)
+      .then((execution) => {
+        set((state) => ({
+          executions: state.executions.map((e) =>
+            e.id === execution.id ? execution : e
+          ),
+          currentExecution:
+            state.currentExecution?.id === execution.id
+              ? execution
+              : state.currentExecution,
+        }));
+      })
+      .catch(() => {
+        // Silently handle error
+      });
+  },
+
+  handleExecutionMilestone: (data: ExecutionMilestonePayload) => {
+    if (!data.execution_id) return;
+
+    set((state) => ({
+      executionMilestones: {
+        ...state.executionMilestones,
+        [data.execution_id]: data.milestone,
+      },
+    }));
+  },
+
+  clearMilestone: (executionId: string) => {
+    set((state) => {
+      const newMilestones = { ...state.executionMilestones };
+      delete newMilestones[executionId];
+      return { executionMilestones: newMilestones };
+    });
+  },
+
+  getMilestone: (executionId: string) => {
+    return get().executionMilestones[executionId];
+  },
+
   reset: () => {
     set({
       boards: [],
@@ -622,6 +790,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       executions: [],
       currentExecution: null,
       executionLoading: false,
+      executionMilestones: {},
     });
   },
 }));

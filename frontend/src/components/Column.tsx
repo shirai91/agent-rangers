@@ -11,7 +11,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Plus, MoreVertical, Trash2, Edit, Settings } from 'lucide-react';
+import { useState } from 'react';
 import { TaskCard } from './TaskCard';
 import type { Column as ColumnType, Task } from '@/types';
 import { useBoardStore } from '@/stores/boardStore';
@@ -39,6 +50,7 @@ export function Column({
   isDragging = false,
 }: ColumnProps) {
   const { deleteColumn } = useBoardStore();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -53,12 +65,11 @@ export function Column({
   };
 
   const handleDelete = async () => {
-    if (window.confirm(`Are you sure you want to delete column "${column.name}"? All tasks in this column will be deleted.`)) {
-      try {
-        await deleteColumn(column.id);
-      } catch (error) {
-        console.error('Failed to delete column:', error);
-      }
+    try {
+      await deleteColumn(column.id);
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error('Failed to delete column:', error);
     }
   };
 
@@ -101,7 +112,10 @@ export function Column({
                     <Settings className="mr-2 h-4 w-4" />
                     Settings
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleDelete}>
+                  <DropdownMenuItem
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                  >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete
                   </DropdownMenuItem>
@@ -138,6 +152,26 @@ export function Column({
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Column?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{column.name}"? All tasks in this column will be deleted. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

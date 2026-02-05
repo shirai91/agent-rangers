@@ -865,6 +865,14 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 - [x] Removed redundant "Output Files" section from ExecutionDetails
 - [x] Execution details expand inline below selected execution item
 
+### 3.1.5 Git-Based File Change Tracking (NEW)
+- [x] `_capture_git_state()` - captures git status before agent execution
+- [x] `_get_git_changed_files()` - compares post-execution state via git diff
+- [x] Development phase now tracks actual file changes (created vs modified)
+- [x] Frontend shows git-tracked changes with Created/Modified sections
+- [x] Diff stats displayed when available
+- [x] Falls back to file listing for non-git directories
+
 ---
 
 ## Phase 3+: Repository Awareness & Auto-Evaluation 🔄 IN PROGRESS

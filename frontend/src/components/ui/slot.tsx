@@ -75,13 +75,14 @@ const Slot = React.forwardRef<HTMLElement, SlotProps>((props, forwardedRef) => {
       }
     })
 
-    return (
-      <SlotClone {...slotProps} ref={forwardedRef}>
-        {React.isValidElement(newElement)
-          ? React.cloneElement(newElement, undefined, newChildren)
-          : null}
-      </SlotClone>
-    )
+    if (React.isValidElement(newElement)) {
+      return (
+        <SlotClone {...slotProps} ref={forwardedRef}>
+          {React.cloneElement(newElement, undefined, newChildren)}
+        </SlotClone>
+      )
+    }
+    return null
   }
 
   const child = React.Children.only(children)

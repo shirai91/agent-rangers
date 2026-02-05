@@ -206,6 +206,14 @@ def build_architect_prompt(task_title: str, task_description: str, context: dict
     ]
 
     if context:
+        # Include repository path if available
+        if context.get("repository_path"):
+            prompt_parts.extend([
+                "## Repository",
+                f"Working in repository: `{context['repository_path']}`",
+                "",
+            ])
+            
         if context.get("existing_files"):
             prompt_parts.extend([
                 "## Existing Files",
