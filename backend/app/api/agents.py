@@ -17,8 +17,6 @@ from app.schemas.agent import (
     AgentExecutionResponse,
     AgentOutputResponse,
     ExecutionStatusResponse,
-    ClarifyRequest,
-    ClarifyResponse,
 )
 
 router = APIRouter()
@@ -252,83 +250,6 @@ async def get_task_executions(
                 output.files_created = output.files_created[:50]
     
     return executions
-
-
-@router.post(
-    "/tasks/{task_id}/clarify",
-    response_model=ClarifyResponse,
-)
-async def submit_clarification(
-    task_id: UUID,
-    request_data: ClarifyRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Submit clarification answers and resume the planning phase.
-
-    Args:
-        task_id: Task UUID
-        request_data: Clarification answers
-
-    Returns:
-        New execution details
-
-    Raises:
-        HTTPException: 404 if task not found, 400 if no pending clarification
-    """
-    from app.models.task import Task
-    from app.models.agent_execution import AgentExecution
-    from sqlalchemy import select
-
-    # Validate task exists
-    task = await db.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-
-    # Find the execution awaiting clarification
-    result = await db.execute(
-        select(AgentExecution)
-        .where(
-            AgentExecution.task_id == task_id,
-            AgentExecution.status == "awaiting_clarification",
-        )
-        .order_by(AgentExecution.created_at.desc())
-        .limit(1)
-    )
-    execution = result.scalar_one_or_none()
-
-    if not execution:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No execution awaiting clarification for this task",
-        )
-
-    # Resume execution with clarification answers
-    try:
-        new_execution = await AgentOrchestrator.resume_with_clarification(
-            db, execution.id, request_data.answers
-        )
-        await db.commit()
-
-        # Start the new execution in background
-        asyncio.create_task(_run_workflow_background(new_execution.id))
-
-        return ClarifyResponse(
-            execution_id=new_execution.id,
-            task_id=task_id,
-            status=new_execution.status,
-            message="Planning resumed with clarification answers",
-        )
-    except Exception as e:
-        logger.error(f"Failed to resume with clarification: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
 
 
 @router.get(

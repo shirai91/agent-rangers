@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -26,8 +24,6 @@ import {
   GitBranch,
   AlertCircle,
   GitCommit,
-  HelpCircle,
-  Send,
 } from 'lucide-react';
 import type { AgentOutput } from '@/types';
 
@@ -63,16 +59,8 @@ interface BranchInfo {
   created?: boolean;
 }
 
-interface ClarificationInfo {
-  status: 'pending' | 'answered';
-  questions: string[];
-  context_gathered?: string;
-}
-
 interface AgentOutputViewerProps {
   output: AgentOutput;
-  taskId?: string;
-  onClarificationSubmit?: () => void;
 }
 
 interface FileRowProps {
@@ -131,7 +119,7 @@ function FileRow({ filePath, variant, onView, rawUrl }: FileRowProps) {
   );
 }
 
-export function AgentOutputViewer({ output, taskId, onClarificationSubmit }: AgentOutputViewerProps) {
+export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
   const [showContent, setShowContent] = useState(false);
   const [showStructured, setShowStructured] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
@@ -139,54 +127,6 @@ export function AgentOutputViewer({ output, taskId, onClarificationSubmit }: Age
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
-  
-  // Clarification state
-  const [clarificationAnswers, setClarificationAnswers] = useState<string[]>([]);
-  const [submittingClarification, setSubmittingClarification] = useState(false);
-  const [clarificationError, setClarificationError] = useState<string | null>(null);
-  
-  // Get clarification info from output
-  const clarification = output.output_structured?.clarification as ClarificationInfo | undefined;
-  const needsClarification = clarification?.status === 'pending' && clarification?.questions?.length > 0;
-  
-  // Initialize answers array when clarification questions appear
-  if (needsClarification && clarificationAnswers.length !== clarification.questions.length) {
-    setClarificationAnswers(new Array(clarification.questions.length).fill(''));
-  }
-  
-  // Submit clarification answers
-  const submitClarification = async () => {
-    if (!taskId || !needsClarification) return;
-    
-    // Validate all answers are provided
-    if (clarificationAnswers.some(a => !a.trim())) {
-      setClarificationError('Please answer all questions');
-      return;
-    }
-    
-    setSubmittingClarification(true);
-    setClarificationError(null);
-    
-    try {
-      const response = await fetch(`${API_URL}/api/agents/tasks/${taskId}/clarify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: clarificationAnswers }),
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to submit clarification');
-      }
-      
-      // Call callback to refresh the execution
-      onClarificationSubmit?.();
-    } catch (err) {
-      setClarificationError(err instanceof Error ? err.message : 'Failed to submit');
-    } finally {
-      setSubmittingClarification(false);
-    }
-  };
 
   // Check if path is a workspace path or absolute project path
   const isWorkspacePath = (filePath: string): boolean => {
@@ -458,85 +398,6 @@ export function AgentOutputViewer({ output, taskId, onClarificationSubmit }: Age
               <div className="text-sm text-destructive">
                 {output.error_message}
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Clarification Panel */}
-        {needsClarification && clarification && (
-          <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
-            <div className="flex items-start gap-3 mb-4">
-              <HelpCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h4 className="font-medium text-amber-800 dark:text-amber-200">
-                  Clarification Needed
-                </h4>
-                <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                  The planner needs more information to create an accurate plan.
-                </p>
-              </div>
-            </div>
-            
-            {/* Context gathered */}
-            {clarification.context_gathered && (
-              <div className="mb-4 p-3 bg-white/50 dark:bg-black/20 rounded-md">
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">
-                  What I understood:
-                </p>
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  {clarification.context_gathered}
-                </p>
-              </div>
-            )}
-            
-            {/* Questions */}
-            <div className="space-y-4">
-              {clarification.questions.map((question, index) => (
-                <div key={index}>
-                  <label className="block text-sm font-medium text-amber-800 dark:text-amber-200 mb-1">
-                    {index + 1}. {question}
-                  </label>
-                  <Textarea
-                    value={clarificationAnswers[index] || ''}
-                    onChange={(e) => {
-                      const newAnswers = [...clarificationAnswers];
-                      newAnswers[index] = e.target.value;
-                      setClarificationAnswers(newAnswers);
-                    }}
-                    placeholder="Your answer..."
-                    className="bg-white dark:bg-black/30"
-                    rows={2}
-                  />
-                </div>
-              ))}
-            </div>
-            
-            {/* Error */}
-            {clarificationError && (
-              <div className="mt-3 p-2 bg-destructive/10 rounded text-sm text-destructive">
-                {clarificationError}
-              </div>
-            )}
-            
-            {/* Submit button */}
-            <div className="mt-4 flex justify-end">
-              <Button
-                onClick={submitClarification}
-                disabled={submittingClarification}
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                {submittingClarification ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Submit Answers
-                  </>
-                )}
-              </Button>
             </div>
           </div>
         )}

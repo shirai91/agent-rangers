@@ -280,77 +280,6 @@ class HybridOrchestrator:
 
         return execution
 
-    @staticmethod
-    async def resume_with_clarification(
-        db: AsyncSession,
-        execution_id: UUID,
-        answers: list[str],
-    ) -> AgentExecution:
-        """
-        Resume an execution that was awaiting clarification.
-        
-        Creates a new execution with the clarification answers included in context,
-        then re-runs the planning phase.
-        
-        Args:
-            db: Database session
-            execution_id: The execution that was awaiting clarification
-            answers: List of answers to the clarification questions
-            
-        Returns:
-            New execution that will continue the workflow
-        """
-        # Get the original execution
-        original = await HybridOrchestrator._get_execution(db, execution_id)
-        if not original:
-            raise ValueError(f"Execution {execution_id} not found")
-        
-        if original.status != "awaiting_clarification":
-            raise ValueError(f"Execution {execution_id} is not awaiting clarification")
-        
-        # Mark original as superseded
-        original.status = "superseded"
-        original.completed_at = datetime.utcnow()
-        
-        # Create new execution with answers in context
-        new_context = dict(original.context) if original.context else {}
-        new_context["clarification_answers"] = answers
-        new_context["resumed_from"] = str(execution_id)
-        
-        new_execution = AgentExecution(
-            task_id=original.task_id,
-            board_id=original.board_id,
-            workflow_type=original.workflow_type,
-            status="pending",
-            iteration=original.iteration + 1,
-            context=new_context,
-        )
-        db.add(new_execution)
-        await db.flush()
-        
-        # Update task status
-        task = await db.get(Task, original.task_id)
-        if task:
-            task.agent_status = "running"
-            await db.flush()
-        
-        # Log activity
-        await ActivityService.log_activity(
-            db=db,
-            task_id=original.task_id,
-            board_id=original.board_id,
-            activity_type="clarification_answered",
-            actor="user",
-            metadata={
-                "original_execution_id": str(execution_id),
-                "new_execution_id": str(new_execution.id),
-                "answer_count": len(answers),
-            },
-        )
-        
-        logger.info(f"Resumed execution {execution_id} -> {new_execution.id} with {len(answers)} answers")
-        return new_execution
-
     # ========================================================================
     # Workflow Execution
     # ========================================================================
@@ -439,42 +368,6 @@ class HybridOrchestrator:
                     architecture_result = await self._run_architecture_phase(
                         db, execution, task, workspace_path, on_output
                     )
-
-                    # Check if clarification is needed - pause workflow
-                    if architecture_result.get("clarification"):
-                        execution.status = "awaiting_clarification"
-                        execution.result_summary = {
-                            "awaiting_clarification": True,
-                            "clarification": architecture_result["clarification"],
-                        }
-                        if task:
-                            task.agent_status = "awaiting_clarification"
-                        await db.flush()
-
-                        await self._emit_activity(
-                            db, execution, "clarification_needed",
-                            {"questions": architecture_result["clarification"]["questions"]}
-                        )
-
-                        # Broadcast clarification needed via WebSocket
-                        asyncio.create_task(
-                            ws_manager.broadcast(
-                                str(execution.board_id),
-                                {
-                                    "type": "execution_awaiting_clarification",
-                                    "payload": {
-                                        "execution_id": str(execution.id),
-                                        "task_id": str(execution.task_id),
-                                        "board_id": str(execution.board_id),
-                                        "status": "awaiting_clarification",
-                                        "clarification": architecture_result["clarification"],
-                                    },
-                                },
-                            )
-                        )
-
-                        # Return early - workflow will resume after clarification
-                        return execution
 
                 elif phase == "development":
                     development_result = await self._run_development_phase(
@@ -659,58 +552,34 @@ class HybridOrchestrator:
                 on_output=on_output,
             )
 
-            # Check for clarification needs
-            clarification = self._parse_clarification_block(arch_content)
-
             # Save architecture to WORKSPACE (not project dir)
             # This prevents dumping temp files into the actual repository
             short_summary = self._generate_short_filename(task.title)
             arch_path = Path(workspace_path) / f"plan-{short_summary}.md"
-
-            # Store content without the clarification block for cleaner display
-            clean_content = self._strip_clarification_block(arch_content) if clarification else arch_content
-            arch_path.write_text(clean_content)
+            arch_path.write_text(arch_content)
 
             output.status = "completed"
             output.completed_at = datetime.utcnow()
-            output.output_content = clean_content
+            output.output_content = arch_content
             output.output_structured = {
                 "architecture_saved": str(arch_path),
                 "project_explored": effective_cwd,
             }
-
-            # Add clarification data to metadata if present
-            if clarification:
-                output.output_structured["clarification"] = {
-                    "status": "pending",
-                    "questions": clarification["questions"],
-                    "context_gathered": clarification.get("context_gathered", ""),
-                }
-                logger.info(f"Clarification needed: {len(clarification['questions'])} questions")
-
             output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
             output.files_created = [str(arch_path)]
 
             await db.flush()
 
             if on_output:
-                message = "Clarification needed from user" if clarification else "Architecture phase completed"
                 await on_output("progress", {
                     "phase": "architecture",
-                    "message": message,
-                    "needs_clarification": clarification is not None,
+                    "message": "Architecture phase completed",
                 })
 
-            result = {
-                "content": clean_content,
+            return {
+                "content": arch_content,
                 "path": str(arch_path),
             }
-
-            # Add clarification info to result so workflow can handle it
-            if clarification:
-                result["clarification"] = clarification
-
-            return result
 
         except Exception as e:
             logger.error(f"Architecture phase failed: {e}")
@@ -859,19 +728,6 @@ class HybridOrchestrator:
                     "",
                 ])
 
-        # Add clarification answers if provided
-        if context and context.get("clarification_answers"):
-            answers = context["clarification_answers"]
-            prompt_parts.extend([
-                "## Previous Questions & Answers",
-                "",
-                "You previously asked for clarification. Here are the answers:",
-                "",
-            ])
-            for i, answer in enumerate(answers):
-                prompt_parts.append(f"{i+1}. {answer}")
-            prompt_parts.extend(["", "Use these answers to create your architecture plan.", ""])
-
         prompt_parts.extend([
             "## Your Task",
             "",
@@ -893,25 +749,6 @@ class HybridOrchestrator:
             "",
             "**Important:** Base your architecture on the ACTUAL codebase structure you discover, not assumptions.",
             "Read existing code to understand patterns, naming conventions, and project organization.",
-            "",
-            "## Clarification Protocol",
-            "",
-            "If the task is too vague, missing critical information, or has ambiguities that could lead to significantly different implementations, ask for clarification instead of making assumptions.",
-            "",
-            "When clarification is needed, output your analysis followed by this block at the END:",
-            "",
-            "```",
-            "<!-- CLARIFICATION_NEEDED -->",
-            '{',
-            '  "status": "needs_clarification",',
-            '  "questions": ["Question 1?", "Question 2?"],',
-            '  "context_gathered": "What I understood so far..."',
-            '}',
-            "<!-- /CLARIFICATION_NEEDED -->",
-            "```",
-            "",
-            "Rules: Only ask 2-4 focused questions. Don't ask about things you can infer from code.",
-            "If you have enough info, proceed WITHOUT this block.",
             "",
             "Start by exploring the project structure and key files, then output your plan.",
         ])
@@ -2551,53 +2388,6 @@ Created sample implementation at: {sample_file}
             "major_issues": [],
             "minor_issues": [],
         }
-
-    def _parse_clarification_block(self, content: str) -> Optional[dict]:
-        """
-        Parse CLARIFICATION_NEEDED block from planner output.
-
-        Args:
-            content: The full planner output content
-
-        Returns:
-            Clarification dict if found, None otherwise
-        """
-        # Match the clarification block at the end of content
-        pattern = r"<!--\s*CLARIFICATION_NEEDED\s*-->\s*(\{[\s\S]*?\})\s*<!--\s*/CLARIFICATION_NEEDED\s*-->"
-        match = re.search(pattern, content)
-
-        if not match:
-            return None
-
-        try:
-            clarification_data = json.loads(match.group(1))
-
-            # Validate the structure
-            if clarification_data.get("status") == "needs_clarification":
-                questions = clarification_data.get("questions", [])
-                if questions and isinstance(questions, list) and len(questions) > 0:
-                    return {
-                        "status": "needs_clarification",
-                        "questions": questions,
-                        "context_gathered": clarification_data.get("context_gathered", ""),
-                    }
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse clarification block JSON: {e}")
-
-        return None
-
-    def _strip_clarification_block(self, content: str) -> str:
-        """
-        Remove the CLARIFICATION_NEEDED block from content.
-
-        Args:
-            content: The full planner output content
-
-        Returns:
-            Content with clarification block removed
-        """
-        pattern = r"<!--\s*CLARIFICATION_NEEDED\s*-->[\s\S]*?<!--\s*/CLARIFICATION_NEEDED\s*-->"
-        return re.sub(pattern, "", content).strip()
 
     async def _build_result_summary(
         self,
