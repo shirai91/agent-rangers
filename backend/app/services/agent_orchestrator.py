@@ -847,7 +847,15 @@ class HybridOrchestrator:
             
             # Use git-tracked changes if available, otherwise fall back to listing files
             if git_changes.get("is_git_repo") and not git_changes.get("error"):
-                files_created = git_changes.get("all_changed", [])
+                # Convert relative paths to absolute paths for file viewing
+                relative_files = git_changes.get("all_changed", [])
+                files_created = [os.path.join(effective_cwd, f) for f in relative_files]
+                
+                # Also update git_changes with absolute paths for frontend
+                git_changes["created_absolute"] = [os.path.join(effective_cwd, f) for f in git_changes.get("created", [])]
+                git_changes["modified_absolute"] = [os.path.join(effective_cwd, f) for f in git_changes.get("modified", [])]
+                git_changes["working_directory"] = effective_cwd
+                
                 logger.info(f"Git tracked changes: {len(files_created)} files - created: {len(git_changes.get('created', []))}, modified: {len(git_changes.get('modified', []))}")
                 
                 # Auto-commit changes after development completes

@@ -46,6 +46,10 @@ interface GitChanges {
   is_git_repo: boolean;
   error?: string;
   commit?: GitCommit;
+  // Absolute paths for file viewing
+  created_absolute?: string[];
+  modified_absolute?: string[];
+  working_directory?: string;
 }
 
 interface BranchInfo {
@@ -510,7 +514,7 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                     {/* Git-tracked changes */}
                     {hasGitChanges ? (
                       <>
-                        {/* Created files */}
+                        {/* Created files - use absolute paths if available */}
                         {gitChanges.created && gitChanges.created.length > 0 && (
                           <div>
                             <div className="flex items-center gap-2 mb-2 text-xs font-medium text-green-600">
@@ -518,20 +522,25 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                               Created ({gitChanges.created.length})
                             </div>
                             <div className="space-y-1">
-                              {gitChanges.created.map((file, index) => (
-                                <FileRow 
-                                  key={`created-${index}`}
-                                  filePath={file}
-                                  variant="created"
-                                  onView={() => loadFileContent(file)}
-                                  rawUrl={getRawFileUrl(file)}
-                                />
-                              ))}
+                              {gitChanges.created.map((file, index) => {
+                                // Use absolute path if available, otherwise construct from working_directory
+                                const absolutePath = gitChanges.created_absolute?.[index] 
+                                  || (gitChanges.working_directory ? `${gitChanges.working_directory}/${file}` : file);
+                                return (
+                                  <FileRow 
+                                    key={`created-${index}`}
+                                    filePath={absolutePath}
+                                    variant="created"
+                                    onView={() => loadFileContent(absolutePath)}
+                                    rawUrl={getRawFileUrl(absolutePath)}
+                                  />
+                                );
+                              })}
                             </div>
                           </div>
                         )}
 
-                        {/* Modified files */}
+                        {/* Modified files - use absolute paths if available */}
                         {gitChanges.modified && gitChanges.modified.length > 0 && (
                           <div>
                             <div className="flex items-center gap-2 mb-2 text-xs font-medium text-yellow-600">
@@ -539,15 +548,20 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                               Modified ({gitChanges.modified.length})
                             </div>
                             <div className="space-y-1">
-                              {gitChanges.modified.map((file, index) => (
-                                <FileRow 
-                                  key={`modified-${index}`}
-                                  filePath={file}
-                                  variant="modified"
-                                  onView={() => loadFileContent(file)}
-                                  rawUrl={getRawFileUrl(file)}
-                                />
-                              ))}
+                              {gitChanges.modified.map((file, index) => {
+                                // Use absolute path if available, otherwise construct from working_directory
+                                const absolutePath = gitChanges.modified_absolute?.[index]
+                                  || (gitChanges.working_directory ? `${gitChanges.working_directory}/${file}` : file);
+                                return (
+                                  <FileRow 
+                                    key={`modified-${index}`}
+                                    filePath={absolutePath}
+                                    variant="modified"
+                                    onView={() => loadFileContent(absolutePath)}
+                                    rawUrl={getRawFileUrl(absolutePath)}
+                                  />
+                                );
+                              })}
                             </div>
                           </div>
                         )}
