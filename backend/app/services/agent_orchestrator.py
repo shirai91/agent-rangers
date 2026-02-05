@@ -654,6 +654,9 @@ class HybridOrchestrator:
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             content = ansi_escape.sub('', content)
             content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+            # Remove PTY terminal response artifacts (e.g., "9;4;0;" from device attributes)
+            content = re.sub(r'^\d+;\d+;\d+;?\s*', '', content)
+            content = re.sub(r'\n\d+;\d+;\d+;?\s*$', '', content)
 
             logger.info(f"Claude CLI completed, output length: {len(content)}")
             return content.strip()
