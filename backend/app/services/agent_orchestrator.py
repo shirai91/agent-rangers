@@ -804,9 +804,18 @@ class HybridOrchestrator:
             )
             checkout_result = None
             if branch_info and branch_info.get("name"):
-                checkout_result = self._checkout_branch(effective_cwd, branch_info["name"])
+                branch_source = branch_info.get("source", "default")
+                checkout_result = self._checkout_branch(
+                    repo_path=effective_cwd, 
+                    branch_name=branch_info["name"],
+                    source=branch_source,
+                    create_if_missing=(branch_source == "task_text"),  # Only create if explicitly mentioned
+                )
                 if checkout_result.get("success"):
-                    logger.info(f"Working on branch: {branch_info['name']} (source: {branch_info.get('source', 'unknown')})")
+                    if checkout_result.get("created"):
+                        logger.info(f"Created and working on NEW branch: {branch_info['name']}")
+                    else:
+                        logger.info(f"Working on branch: {branch_info['name']} (source: {branch_source})")
                 else:
                     logger.warning(f"Failed to checkout branch {branch_info['name']}, continuing on current branch")
 
@@ -870,6 +879,7 @@ class HybridOrchestrator:
                     "name": branch_info.get("name") if branch_info else None,
                     "source": branch_info.get("source") if branch_info else None,
                     "checkout_success": checkout_result.get("success") if checkout_result else None,
+                    "created": checkout_result.get("created") if checkout_result else False,
                 },
             }
             output.tokens_used = result.get("tokens_used")
@@ -1863,21 +1873,65 @@ Created sample implementation at: {sample_file}
             logger.warning(f"Error loading branch info for task {task_id}: {e}")
         return None
 
-    def _checkout_branch(self, repo_path: str, branch_name: str) -> dict:
+    def _get_default_branch_name(self, repo_path: str) -> str:
+        """
+        Get the default branch name (main or master) for a repository.
+        
+        Args:
+            repo_path: Path to the repository
+            
+        Returns:
+            Default branch name ("main" or "master")
+        """
+        try:
+            # Check if main exists
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "main"],
+                cwd=repo_path,
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return "main"
+            
+            # Check if master exists
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "master"],
+                cwd=repo_path,
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return "master"
+            
+            return "main"  # Default fallback
+        except Exception:
+            return "main"
+
+    def _checkout_branch(
+        self, 
+        repo_path: str, 
+        branch_name: str, 
+        source: str = "default",
+        create_if_missing: bool = False,
+    ) -> dict:
         """
         Checkout a specific branch in the repository.
         
         Args:
             repo_path: Path to the repository
             branch_name: Branch name to checkout
+            source: Source of branch detection ("task_text", "llm_suggestion", "default")
+            create_if_missing: If True and source is "task_text", create branch if it doesn't exist
             
         Returns:
-            Result dict: {"success": True/False, "previous_branch": "...", "error": "..."}
+            Result dict: {"success": True/False, "previous_branch": "...", "created": True/False, "error": "..."}
         """
         result = {
             "success": False,
             "branch": branch_name,
             "previous_branch": None,
+            "created": False,
             "error": None,
         }
         
@@ -1932,8 +1986,39 @@ Created sample implementation at: {sample_file}
                     result["success"] = True
                     logger.info(f"Checked out remote branch {branch_name} in {repo_path}")
                 else:
-                    result["error"] = checkout_result.stderr.strip()
-                    logger.warning(f"Failed to checkout branch {branch_name}: {result['error']}")
+                    # Branch doesn't exist locally or remotely
+                    # Create it if source is "task_text" (explicit user request)
+                    if source == "task_text" and create_if_missing:
+                        default_branch = self._get_default_branch_name(repo_path)
+                        logger.info(f"Branch {branch_name} doesn't exist, creating from {default_branch}")
+                        
+                        # First checkout the default branch
+                        subprocess.run(
+                            ["git", "checkout", default_branch],
+                            cwd=repo_path,
+                            capture_output=True,
+                            timeout=30,
+                        )
+                        
+                        # Create new branch from default
+                        create_result = subprocess.run(
+                            ["git", "checkout", "-b", branch_name],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                        )
+                        
+                        if create_result.returncode == 0:
+                            result["success"] = True
+                            result["created"] = True
+                            logger.info(f"Created and checked out new branch {branch_name} from {default_branch}")
+                        else:
+                            result["error"] = create_result.stderr.strip()
+                            logger.warning(f"Failed to create branch {branch_name}: {result['error']}")
+                    else:
+                        result["error"] = f"Branch {branch_name} doesn't exist"
+                        logger.warning(f"Branch {branch_name} doesn't exist and won't be created (source: {source})")
                     
         except subprocess.TimeoutExpired:
             result["error"] = "Git operation timed out"

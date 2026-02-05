@@ -879,14 +879,17 @@ AI Multi-Agent Kanban Framework built on Claude-Flow. Enables software architect
 - [x] Frontend shows commit hash and status
 - [x] Skips commit if no changes or not a git repo
 
-### 3.1.7 Git Branch Detection & Checkout (NEW)
+### 3.1.7 Git Branch Detection & Checkout
 - [x] TaskEvaluator detects branch from task title/description
 - [x] `_get_repo_branches()` - lists branches with last commit dates
 - [x] `_get_default_branch()` - determines main/master based on latest commit
 - [x] `_detect_branch_from_text()` - regex patterns for branch references
 - [x] `_checkout_branch()` - checkouts target branch before development
+- [x] **Auto-create branch** if explicitly mentioned in task but doesn't exist
+- [x] Creates new branch from default (main/master)
 - [x] Branch info stored in info.json and output_structured
 - [x] Frontend shows branch name with source indicator
+- [x] Frontend shows "NEW" badge when branch was created
 
 ---
 

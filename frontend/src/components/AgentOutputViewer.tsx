@@ -52,6 +52,7 @@ interface BranchInfo {
   name: string | null;
   source: string | null;
   checkout_success: boolean | null;
+  created?: boolean;
 }
 
 interface AgentOutputViewerProps {
@@ -447,6 +448,11 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
               <GitBranch className="h-4 w-4 text-purple-600" />
               <span className="font-medium">Branch:</span>
               <code className="bg-muted px-1.5 py-0.5 rounded">{branchInfo.name}</code>
+              {branchInfo.created && (
+                <Badge variant="default" className="text-xs bg-green-600">
+                  NEW
+                </Badge>
+              )}
               <Badge variant="outline" className="text-xs">
                 {sourceLabel}
               </Badge>
