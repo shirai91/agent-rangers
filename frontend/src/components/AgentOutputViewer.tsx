@@ -133,6 +133,34 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
     return filePath.includes('/tmp/workspaces/');
   };
 
+  // Check if path is absolute (starts with /)
+  const isAbsolutePath = (filePath: string): boolean => {
+    return filePath.startsWith('/');
+  };
+
+  // Get working directory from git_changes or construct from known paths
+  const getWorkingDirectory = (): string | null => {
+    const gitChanges = output.output_structured?.git_changes as GitChanges | undefined;
+    if (gitChanges?.working_directory) {
+      return gitChanges.working_directory;
+    }
+    // For old data, we can't determine the working directory
+    return null;
+  };
+
+  // Resolve a potentially relative path to an absolute path
+  const resolveFilePath = (filePath: string): string => {
+    if (isAbsolutePath(filePath)) {
+      return filePath;
+    }
+    const workDir = getWorkingDirectory();
+    if (workDir) {
+      return `${workDir}/${filePath}`;
+    }
+    // Can't resolve - return as-is (will fail to load but shows the path)
+    return filePath;
+  };
+
   // Extract task_id from file path (format: /tmp/workspaces/{task_id}/...)
   const extractTaskId = (filePath: string): string | null => {
     const match = filePath.match(/\/tmp\/workspaces\/([^\/]+)/);
@@ -523,9 +551,9 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                             </div>
                             <div className="space-y-1">
                               {gitChanges.created.map((file, index) => {
-                                // Use absolute path if available, otherwise construct from working_directory
+                                // Use absolute path if available, otherwise try to resolve
                                 const absolutePath = gitChanges.created_absolute?.[index] 
-                                  || (gitChanges.working_directory ? `${gitChanges.working_directory}/${file}` : file);
+                                  || resolveFilePath(file);
                                 return (
                                   <FileRow 
                                     key={`created-${index}`}
@@ -549,9 +577,9 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                             </div>
                             <div className="space-y-1">
                               {gitChanges.modified.map((file, index) => {
-                                // Use absolute path if available, otherwise construct from working_directory
+                                // Use absolute path if available, otherwise try to resolve
                                 const absolutePath = gitChanges.modified_absolute?.[index]
-                                  || (gitChanges.working_directory ? `${gitChanges.working_directory}/${file}` : file);
+                                  || resolveFilePath(file);
                                 return (
                                   <FileRow 
                                     key={`modified-${index}`}
@@ -608,13 +636,14 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                       <div className="space-y-1">
                         {filesCreated.map((file, index) => {
                           const filePath = typeof file === 'string' ? file : JSON.stringify(file);
+                          const resolvedPath = resolveFilePath(filePath);
                           return (
                             <FileRow 
                               key={index}
-                              filePath={filePath}
+                              filePath={resolvedPath}
                               variant="default"
-                              onView={() => loadFileContent(filePath)}
-                              rawUrl={getRawFileUrl(filePath)}
+                              onView={() => loadFileContent(resolvedPath)}
+                              rawUrl={getRawFileUrl(resolvedPath)}
                             />
                           );
                         })}
