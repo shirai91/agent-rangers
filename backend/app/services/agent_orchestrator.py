@@ -827,6 +827,21 @@ class HybridOrchestrator:
             if git_changes.get("is_git_repo") and not git_changes.get("error"):
                 files_created = git_changes.get("all_changed", [])
                 logger.info(f"Git tracked changes: {len(files_created)} files - created: {len(git_changes.get('created', []))}, modified: {len(git_changes.get('modified', []))}")
+                
+                # Auto-commit changes after development completes
+                commit_result = self._auto_commit_changes(
+                    path=effective_cwd,
+                    task_id=str(task.id),
+                    task_title=task.title,
+                    execution_id=str(execution.id),
+                    git_changes=git_changes,
+                )
+                if commit_result.get("committed"):
+                    logger.info(f"Auto-committed: {commit_result.get('commit_hash', 'unknown')}")
+                    git_changes["commit"] = commit_result
+                else:
+                    logger.info(f"Auto-commit skipped: {commit_result.get('reason', 'unknown')}")
+                    git_changes["commit"] = commit_result
             else:
                 # Fall back to listing workspace files if not a git repo
                 files_created = self._list_workspace_files(effective_cwd)
@@ -837,7 +852,7 @@ class HybridOrchestrator:
             output.output_content = result["content"]
             output.output_structured = {
                 **(result.get("structured") or {}),
-                "git_changes": git_changes,  # Store detailed git change info
+                "git_changes": git_changes,  # Store detailed git change info including commit
             }
             output.tokens_used = result.get("tokens_used")
             output.duration_ms = int((output.completed_at - output.started_at).total_seconds() * 1000)
@@ -2026,6 +2041,109 @@ Created sample implementation at: {sample_file}
                 "is_git_repo": True,
                 "error": str(e),
             }
+
+    def _auto_commit_changes(
+        self, 
+        path: str, 
+        task_id: str, 
+        task_title: str, 
+        execution_id: str,
+        git_changes: dict,
+    ) -> dict:
+        """
+        Auto-commit changes made by the developer agent.
+        
+        Args:
+            path: Working directory path
+            task_id: Task ID for commit message
+            task_title: Task title for commit message
+            execution_id: Execution ID for reference
+            git_changes: Git changes dict from _get_git_changed_files()
+            
+        Returns:
+            dict with commit info or error
+        """
+        if not git_changes.get("is_git_repo"):
+            return {"committed": False, "reason": "not a git repository"}
+        
+        all_changed = git_changes.get("all_changed", [])
+        if not all_changed:
+            return {"committed": False, "reason": "no files changed"}
+        
+        try:
+            # Stage all changed files
+            for file in all_changed:
+                stage_result = subprocess.run(
+                    ["git", "add", file],
+                    cwd=path,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if stage_result.returncode != 0:
+                    logger.warning(f"Failed to stage {file}: {stage_result.stderr}")
+            
+            # Create commit message
+            short_task_id = str(task_id)[:8]
+            # Sanitize task title for commit message
+            safe_title = task_title.replace('"', "'").replace('\n', ' ')[:50]
+            commit_message = f"[Agent Rangers] {safe_title}\n\nTask: {task_id}\nExecution: {execution_id}\n\nFiles changed:\n"
+            
+            created = git_changes.get("created", [])
+            modified = git_changes.get("modified", [])
+            
+            if created:
+                commit_message += f"\nCreated ({len(created)}):\n"
+                for f in created[:10]:  # Limit to 10 files in message
+                    commit_message += f"  + {f}\n"
+                if len(created) > 10:
+                    commit_message += f"  ... and {len(created) - 10} more\n"
+            
+            if modified:
+                commit_message += f"\nModified ({len(modified)}):\n"
+                for f in modified[:10]:
+                    commit_message += f"  ~ {f}\n"
+                if len(modified) > 10:
+                    commit_message += f"  ... and {len(modified) - 10} more\n"
+            
+            # Commit
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            
+            if commit_result.returncode != 0:
+                # Check if it's just "nothing to commit"
+                if "nothing to commit" in commit_result.stdout or "nothing to commit" in commit_result.stderr:
+                    return {"committed": False, "reason": "nothing to commit"}
+                logger.warning(f"Git commit failed: {commit_result.stderr}")
+                return {"committed": False, "reason": commit_result.stderr}
+            
+            # Get the commit hash
+            hash_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            commit_hash = hash_result.stdout.strip() if hash_result.returncode == 0 else None
+            
+            logger.info(f"Auto-committed changes for task {short_task_id}: {commit_hash}")
+            
+            return {
+                "committed": True,
+                "commit_hash": commit_hash,
+                "files_committed": len(all_changed),
+                "message": commit_message.split('\n')[0],  # First line only
+            }
+            
+        except Exception as e:
+            logger.error(f"Auto-commit failed for task {task_id}: {e}")
+            return {"committed": False, "reason": str(e)}
 
     def _parse_review_result(self, content: str) -> dict:
         """Parse review result from content."""

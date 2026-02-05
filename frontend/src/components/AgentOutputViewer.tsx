@@ -22,10 +22,20 @@ import {
   ExternalLink,
   Loader2,
   GitBranch,
+  AlertCircle,
+  GitCommit,
 } from 'lucide-react';
 import type { AgentOutput } from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+interface GitCommit {
+  committed: boolean;
+  commit_hash?: string;
+  files_committed?: number;
+  message?: string;
+  reason?: string;
+}
 
 interface GitChanges {
   created: string[];
@@ -35,6 +45,7 @@ interface GitChanges {
   diff_stats: string[];
   is_git_repo: boolean;
   error?: string;
+  commit?: GitCommit;
 }
 
 interface AgentOutputViewerProps {
@@ -510,6 +521,31 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                             <pre className="text-xs font-mono bg-muted p-2 rounded overflow-x-auto">
                               {gitChanges.diff_stats.join('\n')}
                             </pre>
+                          </div>
+                        )}
+
+                        {/* Commit info */}
+                        {gitChanges.commit && (
+                          <div className="mt-3 pt-3 border-t">
+                            {gitChanges.commit.committed ? (
+                              <div className="flex items-center gap-2 text-xs">
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                <span className="font-medium text-green-600">Auto-committed</span>
+                                {gitChanges.commit.commit_hash && (
+                                  <code className="bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                                    {gitChanges.commit.commit_hash.slice(0, 7)}
+                                  </code>
+                                )}
+                                <span className="text-muted-foreground">
+                                  ({gitChanges.commit.files_committed} files)
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <AlertCircle className="h-4 w-4" />
+                                <span>Not committed: {gitChanges.commit.reason}</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </>

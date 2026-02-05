@@ -773,18 +773,56 @@ Track actual file changes made by developer agent using git:
 
 ---
 
-### Step 3.1.6: Testing & Commit
+### Step 3.1.6: Auto-Commit After Development ✅
+**Time:** 1 hour
+
+Auto-commit changes made by developer agent for clean git history:
+
+1. `_auto_commit_changes()` - stages and commits all changed files
+2. Commit message format: `[Agent Rangers] {task_title}`
+3. Message body includes task ID, execution ID, and file list
+4. Frontend shows commit hash with green checkmark
+5. Skips commit gracefully if no changes or not a git repo
+
+**Commit Message Format:**
+```
+[Agent Rangers] {task_title}
+
+Task: {task_id}
+Execution: {execution_id}
+
+Files changed:
+
+Created (N):
+  + file1.py
+  + file2.tsx
+
+Modified (M):
+  ~ existing_file.py
+```
+
+**Deliverables:**
+- [x] Auto-commit after development phase completes
+- [x] Informative commit messages with task context
+- [x] Frontend displays commit hash and status
+- [x] Graceful handling of edge cases
+
+---
+
+### Step 3.1.7: Testing & Commit
 **Time:** 1 hour
 
 1. Test "Plan Only" (architecture_only) workflow end-to-end
 2. Verify architecture output saved to workspace
 3. Verify file viewing works in UI
 4. Test git change tracking shows actual changes
+5. Test auto-commit creates proper commit
 
 **Deliverables:**
 - [x] Architecture phase runs with codebase exploration
 - [x] Outputs viewable in UI
 - [x] Git changes tracked accurately
+- [x] Auto-commit works correctly
 
 ---
 
