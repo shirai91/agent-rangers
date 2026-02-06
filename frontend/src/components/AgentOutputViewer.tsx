@@ -93,16 +93,16 @@ function FileRow({ filePath, variant, onView, rawUrl }: FileRowProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2"
+          className="h-7 px-1.5 sm:px-2"
           onClick={onView}
         >
-          <Eye className="h-3 w-3 mr-1" />
-          View
+          <Eye className="h-3 w-3 sm:mr-1" />
+          <span className="hidden sm:inline">View</span>
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2"
+          className="h-7 px-1.5 sm:px-2"
           asChild
         >
           <a
@@ -110,8 +110,8 @@ function FileRow({ filePath, variant, onView, rawUrl }: FileRowProps) {
             target="_blank"
             rel="noopener noreferrer"
           >
-            <ExternalLink className="h-3 w-3 mr-1" />
-            Raw
+            <ExternalLink className="h-3 w-3 sm:mr-1" />
+            <span className="hidden sm:inline">Raw</span>
           </a>
         </Button>
       </div>
@@ -359,11 +359,11 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
   return (
     <Card className="mb-3">
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Cpu className="h-4 w-4 text-muted-foreground" />
-              {output.agent_name}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <CardTitle className="text-sm font-semibold flex flex-wrap items-center gap-2">
+              <Cpu className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <span className="truncate">{output.agent_name}</span>
               <Badge variant="outline" className="text-xs font-normal">
                 {getPhaseLabel(output.phase)}
               </Badge>
@@ -373,7 +373,7 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                 </Badge>
               )}
             </CardTitle>
-            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-muted-foreground">
               <div className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 <span>{formatDuration(output.duration_ms)}</span>
@@ -385,7 +385,7 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
               )}
             </div>
           </div>
-          <div>{getStatusBadge()}</div>
+          <div className="flex-shrink-0">{getStatusBadge()}</div>
         </div>
       </CardHeader>
 
@@ -476,10 +476,10 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
           }[branchInfo.source || 'default'] || branchInfo.source;
           
           return (
-            <div className="flex items-center gap-2 text-xs p-2 bg-muted/50 rounded-md">
-              <GitBranch className="h-4 w-4 text-purple-600" />
+            <div className="flex flex-wrap items-center gap-2 text-xs p-2 bg-muted/50 rounded-md">
+              <GitBranch className="h-4 w-4 text-purple-600 flex-shrink-0" />
               <span className="font-medium">Branch:</span>
-              <code className="bg-muted px-1.5 py-0.5 rounded">{branchInfo.name}</code>
+              <code className="bg-muted px-1.5 py-0.5 rounded truncate max-w-[200px] sm:max-w-none">{branchInfo.name}</code>
               {branchInfo.created && (
                 <Badge variant="default" className="text-xs bg-green-600">
                   NEW
@@ -610,8 +610,8 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                         {gitChanges.commit && (
                           <div className="mt-3 pt-3 border-t">
                             {gitChanges.commit.committed ? (
-                              <div className="flex items-center gap-2 text-xs">
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
                                 <span className="font-medium text-green-600">Auto-committed</span>
                                 {gitChanges.commit.commit_hash && (
                                   <code className="bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
@@ -623,8 +623,8 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
                                 </span>
                               </div>
                             ) : (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <AlertCircle className="h-4 w-4" />
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0" />
                                 <span>Not committed: {gitChanges.commit.reason}</span>
                               </div>
                             )}
@@ -662,7 +662,7 @@ export function AgentOutputViewer({ output }: AgentOutputViewerProps) {
           setFileContent(null);
           setFileError(null);
         }}>
-          <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogContent className="w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileCode className="h-5 w-5" />
