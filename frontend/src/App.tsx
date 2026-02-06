@@ -87,7 +87,7 @@ function BoardsListView() {
   return (
     <>
       <header className="border-b">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <LayoutDashboard className="h-8 w-8 text-primary" />
@@ -107,7 +107,7 @@ function BoardsListView() {
       </header>
 
       <main className="container mx-auto">
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           <div className="mb-6">
             <h2 className="text-3xl font-bold">Your Boards</h2>
             <p className="text-muted-foreground mt-2">
@@ -280,7 +280,7 @@ function BoardView() {
     return (
       <>
         <header className="border-b">
-          <div className="container mx-auto px-6 py-4">
+          <div className="container mx-auto px-4 sm:px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <LayoutDashboard className="h-8 w-8 text-primary" />
@@ -292,21 +292,21 @@ function BoardView() {
                 </div>
               </div>
               <Button variant="outline" onClick={handleBackToBoards}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Boards
+                <ArrowLeft className="h-4 w-4" />
+                <span className="hidden sm:inline ml-2">Back to Boards</span>
               </Button>
             </div>
           </div>
         </header>
         <main className="container mx-auto h-[calc(100vh-80px)]">
           <div className="flex flex-col h-full overflow-hidden">
-            <div className="border-b px-6 py-4">
+            <div className="border-b px-4 sm:px-6 py-4">
               <Skeleton className="h-8 w-48" />
               <Skeleton className="h-4 w-72 mt-2" />
             </div>
-            <div className="flex gap-4 p-6">
+            <div className="flex gap-4 p-4 sm:p-6">
               {[...Array(3)].map((_, i) => (
-                <Card key={i} className="w-80 flex-shrink-0">
+                <Card key={i} className="w-72 sm:w-80 flex-shrink-0">
                   <CardHeader>
                     <Skeleton className="h-6 w-32" />
                   </CardHeader>
@@ -326,7 +326,7 @@ function BoardView() {
   return (
     <>
       <header className="border-b">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <LayoutDashboard className="h-8 w-8 text-primary" />
@@ -338,8 +338,8 @@ function BoardView() {
               </div>
             </div>
             <Button variant="outline" onClick={handleBackToBoards}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Boards
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline ml-2">Back to Boards</span>
             </Button>
           </div>
         </div>
@@ -347,7 +347,7 @@ function BoardView() {
 
       <main className="container mx-auto h-[calc(100vh-80px)]">
         <div className="flex flex-col h-full overflow-hidden">
-          <div className="border-b px-6 py-4 flex items-center justify-between">
+          <div className="border-b px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold">{currentBoard.name}</h2>
               {currentBoard.description && (
@@ -356,18 +356,18 @@ function BoardView() {
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => setBoardSettingsOpen(true)}>
-                <FolderCog className="mr-2 h-4 w-4" />
-                Settings
+                <FolderCog className="h-4 w-4" />
+                <span className="hidden sm:inline ml-2">Settings</span>
               </Button>
               <Button variant="outline" onClick={() => setActivityFeedOpen(true)}>
-                <Activity className="mr-2 h-4 w-4" />
-                Activity
+                <Activity className="h-4 w-4" />
+                <span className="hidden sm:inline ml-2">Activity</span>
               </Button>
               <Button variant="outline" onClick={() => setWorkflowEditorOpen(true)}>
-                <Settings className="mr-2 h-4 w-4" />
-                Workflow
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline ml-2">Workflow</span>
               </Button>
             </div>
           </div>
@@ -425,7 +425,7 @@ function BoardView() {
 
       {/* Workflow Editor Dialog */}
       <Dialog open={workflowEditorOpen} onOpenChange={setWorkflowEditorOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Workflow Settings</DialogTitle>
             <DialogDescription>
@@ -438,7 +438,7 @@ function BoardView() {
 
       {/* Activity Feed Dialog */}
       <Dialog open={activityFeedOpen} onOpenChange={setActivityFeedOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Activity Feed</DialogTitle>
             <DialogDescription>

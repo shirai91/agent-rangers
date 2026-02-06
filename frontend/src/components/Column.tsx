@@ -76,7 +76,7 @@ export function Column({
   const taskIds = tasks.map((task) => task.id);
 
   return (
-    <div className="flex-shrink-0 w-80 h-full">
+    <div className="flex-shrink-0 w-72 sm:w-80 h-full">
       <Card className={`flex flex-col h-full transition-all duration-200 ${getDropZoneClass()}`}>
         <CardHeader className="p-4 flex-shrink-0">
           <div className="flex items-center justify-between">

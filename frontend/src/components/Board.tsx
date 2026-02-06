@@ -179,7 +179,7 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, 
 
   return (
     <div className="flex-1 overflow-x-auto overflow-y-hidden min-h-0">
-      <div className="flex gap-4 p-6 h-full">
+      <div className="flex gap-4 p-4 sm:p-6 h-full">
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetection}
@@ -210,7 +210,7 @@ export function Board({ onCreateColumn, onCreateTask, onEditTask, onEditColumn, 
           </DragOverlay>
         </DndContext>
 
-        <div className="flex-shrink-0 w-80">
+        <div className="flex-shrink-0 w-72 sm:w-80">
           <Button
             variant="outline"
             className="w-full h-full min-h-[100px] border-dashed"

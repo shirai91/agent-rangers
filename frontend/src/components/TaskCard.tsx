@@ -260,7 +260,7 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
       </Card>
 
       <Dialog open={showExecutionPanel} onOpenChange={setShowExecutionPanel}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Agent Executions - {task.title}</DialogTitle>
           </DialogHeader>
