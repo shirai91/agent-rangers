@@ -77,18 +77,14 @@ export function WorkflowEditor({ boardId }: WorkflowEditorProps) {
 
   const handleCreateWorkflow = async () => {
     try {
-      console.log('[WorkflowEditor] Creating workflow:', { boardId, name: newWorkflowName });
       const newWorkflow = await api.createWorkflow(boardId, {
         name: newWorkflowName,
         is_active: true,
       });
-      console.log('[WorkflowEditor] Workflow created:', newWorkflow);
       setWorkflow(newWorkflow);
       setShowCreateDialog(false);
       setNewWorkflowName('Default Workflow');
-      console.log('[WorkflowEditor] Fetching allowed transitions for board:', boardId);
       await fetchAllowedTransitions(boardId);
-      console.log('[WorkflowEditor] Allowed transitions fetched successfully');
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to create workflow'));
     }
