@@ -210,9 +210,8 @@ EOF
     log_info "Running database migrations..."
     source "${DEPLOY_ROOT}/backend/venv/bin/activate"
     cd "${DEPLOY_ROOT}/backend"
-    # Alembic migrations if configured
-    # alembic upgrade head
-    log_warn "Migrations skipped (run manually if needed)"
+    alembic upgrade head
+    log_success "Database migrations completed"
     deactivate
     
     # Save version info
