@@ -39,6 +39,21 @@ import {
 import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity, X, FolderCog } from 'lucide-react';
 import type { Task, Column, Board as BoardType } from '@/types';
 
+const ENV_PORT = window.location.port;
+const ENV_LABEL = ENV_PORT === '5174' ? 'SANDBOX' : ENV_PORT === '5173' ? 'DEV' : null;
+const ENV_BADGE_CLASS = ENV_PORT === '5174'
+  ? 'bg-orange-500 text-white'
+  : 'bg-blue-500 text-white';
+
+function EnvBadge() {
+  if (!ENV_LABEL) return null;
+  return (
+    <span className={`${ENV_BADGE_CLASS} text-xs font-semibold px-2 py-0.5 rounded ml-2`}>
+      {ENV_LABEL}
+    </span>
+  );
+}
+
 function BoardsListView() {
   const navigate = useNavigate();
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
@@ -77,7 +92,7 @@ function BoardsListView() {
             <div className="flex items-center gap-4">
               <LayoutDashboard className="h-8 w-8 text-primary" />
               <div>
-                <h1 className="text-2xl font-bold">Agent Rangers</h1>
+                <h1 className="text-2xl font-bold">Agent Rangers<EnvBadge /></h1>
                 <p className="text-sm text-muted-foreground">
                   AI Multi-Agent Kanban Framework
                 </p>
@@ -270,7 +285,7 @@ function BoardView() {
               <div className="flex items-center gap-4">
                 <LayoutDashboard className="h-8 w-8 text-primary" />
                 <div>
-                  <h1 className="text-2xl font-bold">Agent Rangers</h1>
+                  <h1 className="text-2xl font-bold">Agent Rangers<EnvBadge /></h1>
                   <p className="text-sm text-muted-foreground">
                     AI Multi-Agent Kanban Framework
                   </p>
@@ -316,7 +331,7 @@ function BoardView() {
             <div className="flex items-center gap-4">
               <LayoutDashboard className="h-8 w-8 text-primary" />
               <div>
-                <h1 className="text-2xl font-bold">Agent Rangers</h1>
+                <h1 className="text-2xl font-bold">Agent Rangers<EnvBadge /></h1>
                 <p className="text-sm text-muted-foreground">
                   AI Multi-Agent Kanban Framework
                 </p>
@@ -439,6 +454,11 @@ function BoardView() {
 
 function App() {
   const { error, clearError } = useBoardStore();
+
+  useEffect(() => {
+    const suffix = ENV_LABEL === 'DEV' ? ' (Dev)' : ENV_LABEL === 'SANDBOX' ? ' (Sandbox)' : '';
+    document.title = `Agent Rangers${suffix}`;
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">

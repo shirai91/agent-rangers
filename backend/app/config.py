@@ -115,7 +115,7 @@ class Settings(BaseSettings):
         return False
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://agent_rangers:agent_rangers_dev@localhost:5432/agent_rangers"
+    DATABASE_URL: str = "postgresql+asyncpg://soloboy:eW880dRvPhVRIBi3IajQRt77@localhost:5432/agent_rangers"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
