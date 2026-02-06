@@ -137,6 +137,39 @@ export interface ExecutionMilestonePayload {
   timestamp: string;
 }
 
+// Clarification Types
+export interface ClarificationQuestion {
+  id: string;
+  question: string;
+  type: 'single_choice' | 'multiple_choice' | 'free_text';
+  options: string[];
+  required: boolean;
+  context: string | null;
+}
+
+export interface ClarificationData {
+  questions: ClarificationQuestion[];
+  summary: string;
+  confidence: number;
+}
+
+export interface ClarificationNeededPayload {
+  execution_id: string;
+  task_id: string;
+  board_id: string;
+  questions: ClarificationQuestion[];
+  summary: string;
+  confidence: number;
+}
+
+export interface ClarificationResolvedPayload {
+  execution_id: string;
+  task_id: string;
+  board_id: string;
+  status: string;
+  skipped: boolean;
+}
+
 export type WSEvent =
   | { type: 'task_created'; data: Task }
   | { type: 'task_updated'; data: Task }
@@ -152,7 +185,9 @@ export type WSEvent =
   | { type: 'execution_started'; data?: ExecutionStartedPayload; payload?: ExecutionStartedPayload }
   | { type: 'execution_updated'; data?: ExecutionUpdatedPayload; payload?: ExecutionUpdatedPayload }
   | { type: 'execution_completed'; data?: ExecutionCompletedPayload; payload?: ExecutionCompletedPayload }
-  | { type: 'execution_milestone'; data?: ExecutionMilestonePayload; payload?: ExecutionMilestonePayload };
+  | { type: 'execution_milestone'; data?: ExecutionMilestonePayload; payload?: ExecutionMilestonePayload }
+  | { type: 'clarification_needed'; data?: ClarificationNeededPayload; payload?: ClarificationNeededPayload }
+  | { type: 'clarification_resolved'; data?: ClarificationResolvedPayload; payload?: ClarificationResolvedPayload };
 
 // Workflow Types
 export interface WorkflowDefinition {
@@ -269,7 +304,7 @@ export interface UpdateColumnInput {
 export type AllowedTransitionsMap = Record<string, string[]>;
 
 // Agent Types
-export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'awaiting_clarification';
 
 export type AgentPhase = 'architecture' | 'development' | 'review';
 
@@ -309,6 +344,8 @@ export interface AgentExecution {
   error_message: string | null;
   context: Record<string, unknown>;
   result_summary: Record<string, unknown> | null;
+  clarification_questions: ClarificationData | null;
+  clarification_answers: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   outputs?: AgentOutput[];

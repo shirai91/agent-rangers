@@ -26,11 +26,13 @@ import {
   FileCode2,
   Loader2,
   FileText,
+  HelpCircle,
 } from 'lucide-react';
 import { useBoardStore } from '@/stores/boardStore';
 import { api } from '@/api/client';
 import type { AgentExecution, WorkflowType, TaskEvaluation, AvailablePlan } from '@/types';
 import { ExecutionDetails } from './ExecutionDetails';
+import { ClarificationDialog } from './ClarificationDialog';
 
 interface AgentExecutionPanelProps {
   taskId: string;
@@ -51,6 +53,9 @@ export function AgentExecutionPanel({
     startAgentWorkflow,
     cancelExecution,
     setCurrentExecution,
+    pendingClarification,
+    submitClarification,
+    skipClarification,
   } = useBoardStore();
 
   const [selectedExecution, setSelectedExecution] = useState<AgentExecution | null>(null);
@@ -152,6 +157,8 @@ export function AgentExecutionPanel({
         return <XCircle className="h-4 w-4 text-destructive" />;
       case 'running':
         return <PlayCircle className="h-4 w-4 text-blue-600 animate-pulse" />;
+      case 'awaiting_clarification':
+        return <HelpCircle className="h-4 w-4 text-amber-500 animate-pulse" />;
       case 'cancelled':
         return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
       default:
@@ -190,7 +197,37 @@ export function AgentExecutionPanel({
     return labels[phase] || phase;
   };
 
-  const runningExecution = executions.find((e) => e.status === 'running');
+  const runningExecution = executions.find(
+    (e) => e.status === 'running' || e.status === 'awaiting_clarification'
+  );
+
+  const [clarificationLoading, setClarificationLoading] = useState(false);
+
+  const handleSubmitClarification = async (answers: Record<string, string | string[]>) => {
+    if (!pendingClarification) return;
+    setClarificationLoading(true);
+    try {
+      await submitClarification(pendingClarification.execution_id, answers);
+      await fetchTaskExecutions(taskId);
+    } catch (error) {
+      console.error('Failed to submit clarification:', error);
+    } finally {
+      setClarificationLoading(false);
+    }
+  };
+
+  const handleSkipClarification = async () => {
+    if (!pendingClarification) return;
+    setClarificationLoading(true);
+    try {
+      await skipClarification(pendingClarification.execution_id);
+      await fetchTaskExecutions(taskId);
+    } catch (error) {
+      console.error('Failed to skip clarification:', error);
+    } finally {
+      setClarificationLoading(false);
+    }
+  };
 
   const handleReEvaluate = async () => {
     setReEvaluating(true);
@@ -376,6 +413,18 @@ export function AgentExecutionPanel({
               </div>
             )}
           </div>
+
+          {/* Clarification Dialog */}
+          {pendingClarification && pendingClarification.task_id === taskId && (
+            <ClarificationDialog
+              questions={pendingClarification.questions}
+              summary={pendingClarification.summary}
+              confidence={pendingClarification.confidence}
+              onSubmit={handleSubmitClarification}
+              onSkip={handleSkipClarification}
+              loading={clarificationLoading}
+            />
+          )}
 
           {/* Execution history */}
           <div>

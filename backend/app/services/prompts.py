@@ -183,6 +183,98 @@ Your review should follow this structured format:
 """
 
 # =============================================================================
+# Clarity Check Prompt
+# =============================================================================
+
+CLARITY_CHECK_PROMPT = """You are an expert requirements analyst. Analyze the following task description and determine whether the requirements are clear enough to produce a high-quality architecture plan.
+
+Evaluate clarity on these dimensions:
+1. **Scope**: Is the scope of work well-defined? Are boundaries clear?
+2. **Requirements**: Are functional requirements specific enough to implement?
+3. **Technical Context**: Is there enough context about the tech stack, constraints, and existing code?
+4. **Acceptance Criteria**: Can you determine when the task is "done"?
+5. **Ambiguity**: Are there terms or requirements that could be interpreted multiple ways?
+
+## Output Format (STRICT JSON)
+You MUST output ONLY valid JSON with this exact structure — no markdown, no explanation, no code fences:
+
+{
+  "clarity_score": <number 0-100>,
+  "can_proceed": <boolean>,
+  "summary": "<brief explanation of the clarity assessment>",
+  "questions": [
+    {
+      "id": "q1",
+      "question": "<the clarification question>",
+      "type": "single_choice|multiple_choice|free_text",
+      "options": ["option1", "option2"],
+      "required": true,
+      "context": "<why this question matters>"
+    }
+  ]
+}
+
+Rules:
+- `clarity_score`: 0-100 integer. 100 = perfectly clear, 0 = completely ambiguous.
+- `can_proceed`: true if score >= threshold (you'll be told the threshold), false otherwise.
+- `questions`: Only include if `can_proceed` is false. Max 5 questions.
+- For `single_choice` and `multiple_choice`: provide 2-5 `options`.
+- For `free_text`: `options` should be an empty array.
+- Each question must have a unique `id` (q1, q2, etc.).
+"""
+
+
+def build_clarity_check_prompt(
+    task_title: str,
+    task_description: str,
+    clarity_threshold: int = 75,
+    context: dict = None,
+) -> str:
+    """Build the user prompt for the clarity check.
+
+    Args:
+        task_title: Title of the task
+        task_description: Full task description
+        clarity_threshold: Minimum clarity score to proceed (0-100)
+        context: Optional additional context
+
+    Returns:
+        Formatted user prompt for clarity analysis
+    """
+    prompt_parts = [
+        f"# Task: {task_title}",
+        "",
+        "## Description",
+        task_description or "No description provided.",
+        "",
+        f"## Clarity Threshold: {clarity_threshold}%",
+        f"Set `can_proceed` to true only if your clarity_score >= {clarity_threshold}.",
+        "",
+    ]
+
+    if context:
+        if context.get("repository_path"):
+            prompt_parts.extend([
+                "## Repository",
+                f"Working in repository: `{context['repository_path']}`",
+                "",
+            ])
+        if context.get("technology_stack"):
+            prompt_parts.extend([
+                "## Technology Stack",
+                f"This project uses: {', '.join(context['technology_stack'])}",
+                "",
+            ])
+
+    prompt_parts.extend([
+        "## Your Task",
+        "Analyze the clarity of this task description and output your assessment as JSON.",
+    ])
+
+    return "\n".join(prompt_parts)
+
+
+# =============================================================================
 # Context Building Helpers
 # =============================================================================
 

@@ -17,6 +17,7 @@ from app.schemas.agent import (
     AgentExecutionResponse,
     AgentOutputResponse,
     ExecutionStatusResponse,
+    SubmitClarificationRequest,
 )
 
 router = APIRouter()
@@ -209,6 +210,100 @@ async def cancel_execution(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e),
             )
+
+
+@router.post(
+    "/executions/{execution_id}/clarify",
+    response_model=AgentExecutionResponse,
+)
+async def submit_clarification(
+    execution_id: UUID,
+    request_data: SubmitClarificationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Submit clarification answers for an execution awaiting clarification.
+
+    Args:
+        execution_id: Execution UUID
+        request_data: Clarification answers
+
+    Returns:
+        Updated execution record
+
+    Raises:
+        HTTPException: 404 if not found, 400 if not awaiting clarification
+    """
+    try:
+        execution = await AgentOrchestrator.resume_after_clarification(
+            db=db,
+            execution_id=execution_id,
+            answers=request_data.answers,
+            skipped=False,
+        )
+        await db.commit()
+        await db.refresh(execution)
+
+        # Resume workflow in background
+        asyncio.create_task(_run_workflow_background(execution.id))
+
+        return execution
+    except ValueError as e:
+        if "not found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/executions/{execution_id}/skip-clarification",
+    response_model=AgentExecutionResponse,
+)
+async def skip_clarification(
+    execution_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Skip clarification and let AI proceed with planning.
+
+    Args:
+        execution_id: Execution UUID
+
+    Returns:
+        Updated execution record
+
+    Raises:
+        HTTPException: 404 if not found, 400 if not awaiting clarification
+    """
+    try:
+        execution = await AgentOrchestrator.resume_after_clarification(
+            db=db,
+            execution_id=execution_id,
+            answers=None,
+            skipped=True,
+        )
+        await db.commit()
+        await db.refresh(execution)
+
+        # Resume workflow in background
+        asyncio.create_task(_run_workflow_background(execution.id))
+
+        return execution
+    except ValueError as e:
+        if "not found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.get(
@@ -460,7 +555,7 @@ async def stream_execution_output(
                     last_output_count = len(outputs)
 
                 # Check if execution is complete
-                if current_execution.status in ["completed", "failed", "cancelled"]:
+                if current_execution.status in ["completed", "failed", "cancelled", "awaiting_clarification"]:
                     completion_data = {
                         "type": "complete",
                         "status": current_execution.status,

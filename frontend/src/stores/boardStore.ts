@@ -18,6 +18,8 @@ import type {
   ExecutionUpdatedPayload,
   ExecutionCompletedPayload,
   ExecutionMilestonePayload,
+  ClarificationNeededPayload,
+  ClarificationResolvedPayload,
 } from '@/types';
 import { api, ApiError, NetworkError } from '@/api/client';
 
@@ -61,6 +63,9 @@ interface BoardState {
 
   // Execution milestone state (per execution)
   executionMilestones: Record<string, string>;
+
+  // Clarification state
+  pendingClarification: ClarificationNeededPayload | null;
 
   // Actions
   fetchBoards: () => Promise<void>;
@@ -120,6 +125,13 @@ interface BoardState {
   clearMilestone: (executionId: string) => void;
   getMilestone: (executionId: string) => string | undefined;
 
+  // Clarification actions
+  submitClarification: (executionId: string, answers: Record<string, unknown>) => Promise<void>;
+  skipClarification: (executionId: string) => Promise<void>;
+  handleClarificationNeeded: (data: ClarificationNeededPayload) => void;
+  handleClarificationResolved: (data: ClarificationResolvedPayload) => void;
+  clearPendingClarification: () => void;
+
   // Reset
   reset: () => void;
 }
@@ -148,6 +160,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   // Execution milestone state
   executionMilestones: {},
+
+  // Clarification state
+  pendingClarification: null,
 
   fetchBoards: async () => {
     set({ loading: true, error: null });
@@ -774,6 +789,74 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     return get().executionMilestones[executionId];
   },
 
+  submitClarification: async (executionId: string, answers: Record<string, unknown>) => {
+    set({ executionLoading: true, error: null });
+    try {
+      await api.submitClarification(executionId, answers);
+      set({ pendingClarification: null, executionLoading: false });
+    } catch (error) {
+      set({ error: getErrorMessage(error), executionLoading: false });
+      throw error;
+    }
+  },
+
+  skipClarification: async (executionId: string) => {
+    set({ executionLoading: true, error: null });
+    try {
+      await api.skipClarification(executionId);
+      set({ pendingClarification: null, executionLoading: false });
+    } catch (error) {
+      set({ error: getErrorMessage(error), executionLoading: false });
+      throw error;
+    }
+  },
+
+  handleClarificationNeeded: (data: ClarificationNeededPayload) => {
+    set({ pendingClarification: data });
+    // Update execution status in the list
+    set((state) => ({
+      executions: state.executions.map((e) =>
+        e.id === data.execution_id
+          ? { ...e, status: 'awaiting_clarification' }
+          : e
+      ),
+      currentExecution:
+        state.currentExecution?.id === data.execution_id
+          ? { ...state.currentExecution, status: 'awaiting_clarification' }
+          : state.currentExecution,
+      // Update task agent status
+      tasks: state.tasks.map((t) =>
+        t.id === data.task_id
+          ? { ...t, agent_status: 'awaiting_clarification' }
+          : t
+      ),
+    }));
+  },
+
+  handleClarificationResolved: (data: ClarificationResolvedPayload) => {
+    set((state) => ({
+      pendingClarification: null,
+      executions: state.executions.map((e) =>
+        e.id === data.execution_id
+          ? { ...e, status: data.status }
+          : e
+      ),
+      currentExecution:
+        state.currentExecution?.id === data.execution_id
+          ? { ...state.currentExecution, status: data.status }
+          : state.currentExecution,
+      tasks: state.tasks.map((t) =>
+        t.id === data.task_id
+          ? { ...t, agent_status: data.status }
+          : t
+      ),
+    }));
+  },
+
+  clearPendingClarification: () => {
+    set({ pendingClarification: null });
+  },
+
   reset: () => {
     set({
       boards: [],
@@ -791,6 +874,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       currentExecution: null,
       executionLoading: false,
       executionMilestones: {},
+      pendingClarification: null,
     });
   },
 }));

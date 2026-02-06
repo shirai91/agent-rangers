@@ -55,7 +55,7 @@ class AgentExecution(Base):
         default="pending",
         server_default="pending",
         index=True,
-        doc="pending, running, completed, failed, cancelled",
+        doc="pending, running, completed, failed, cancelled, awaiting_clarification",
     )
     current_phase: Mapped[str | None] = mapped_column(
         String(50),
@@ -84,6 +84,16 @@ class AgentExecution(Base):
     error_message: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
+    )
+    clarification_questions: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        doc="Clarification questions from clarity check: {questions: [...], summary: str, confidence: float}",
+    )
+    clarification_answers: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        doc="User answers to clarification questions",
     )
     context: Mapped[dict] = mapped_column(
         JSONB,

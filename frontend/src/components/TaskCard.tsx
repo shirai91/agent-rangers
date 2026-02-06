@@ -165,8 +165,12 @@ export function TaskCard({ task, onEdit }: TaskCardProps) {
 
   return (
     <div ref={setNodeRef} style={style}>
-      <Card 
-        className="mb-2 cursor-pointer hover:shadow-md transition-shadow"
+      <Card
+        className={`mb-2 cursor-pointer hover:shadow-md transition-shadow ${
+          task.agent_status === 'awaiting_clarification'
+            ? 'ring-2 ring-green-400 animate-pulse'
+            : ''
+        }`}
         onClick={handleCardClick}
       >
         <CardHeader className="p-4 pb-2">

@@ -340,6 +340,17 @@ export const api = {
       method: 'DELETE',
     }),
 
+  submitClarification: (executionId: string, answers: Record<string, unknown>) =>
+    fetchJSON<AgentExecution>(`/api/agents/executions/${encodeId(executionId)}/clarify`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }),
+
+  skipClarification: (executionId: string) =>
+    fetchJSON<AgentExecution>(`/api/agents/executions/${encodeId(executionId)}/skip-clarification`, {
+      method: 'POST',
+    }),
+
   getTaskExecutions: (taskId: string, limit?: number) =>
     fetchJSON<AgentExecution[]>(
       `/api/agents/tasks/${encodeId(taskId)}/executions${limit ? `?limit=${limit}` : ''}`

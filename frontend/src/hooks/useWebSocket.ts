@@ -24,6 +24,8 @@ export function useWebSocket(boardId: string | null) {
   const handleExecutionUpdated = useBoardStore((state) => state.handleExecutionUpdated);
   const handleExecutionCompleted = useBoardStore((state) => state.handleExecutionCompleted);
   const handleExecutionMilestone = useBoardStore((state) => state.handleExecutionMilestone);
+  const handleClarificationNeeded = useBoardStore((state) => state.handleClarificationNeeded);
+  const handleClarificationResolved = useBoardStore((state) => state.handleClarificationResolved);
 
   // Validate boardId format (basic UUID validation)
   const isValidBoardId = useCallback((id: string): boolean => {
@@ -86,6 +88,16 @@ export function useWebSocket(boardId: string | null) {
           if (milestoneData) handleExecutionMilestone(milestoneData);
           break;
         }
+        case 'clarification_needed': {
+          const clarificationData = message.data ?? message.payload;
+          if (clarificationData) handleClarificationNeeded(clarificationData);
+          break;
+        }
+        case 'clarification_resolved': {
+          const resolvedData = message.data ?? message.payload;
+          if (resolvedData) handleClarificationResolved(resolvedData);
+          break;
+        }
         default:
           console.warn('Unknown WebSocket message type:', message);
       }
@@ -104,6 +116,8 @@ export function useWebSocket(boardId: string | null) {
     handleExecutionUpdated,
     handleExecutionCompleted,
     handleExecutionMilestone,
+    handleClarificationNeeded,
+    handleClarificationResolved,
   ]);
 
   useEffect(() => {

@@ -76,6 +76,8 @@ class AgentExecutionResponse(BaseModel):
     error_message: Optional[str]
     context: dict[str, Any]
     result_summary: Optional[dict[str, Any]]
+    clarification_questions: Optional[dict[str, Any]] = None
+    clarification_answers: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
     outputs: list[AgentOutputResponse] = Field(default_factory=list)
@@ -101,3 +103,31 @@ class ExecutionStatusResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ClarificationQuestion(BaseModel):
+    """Schema for a single clarification question."""
+
+    id: str
+    question: str
+    type: str = Field(description="single_choice, multiple_choice, or free_text")
+    options: list[str] = Field(default_factory=list)
+    required: bool = True
+    context: Optional[str] = None
+
+
+class ClarificationResponse(BaseModel):
+    """Schema for clarity check response from AI."""
+
+    clarity_score: int
+    can_proceed: bool
+    summary: str
+    questions: list[ClarificationQuestion] = Field(default_factory=list)
+
+
+class SubmitClarificationRequest(BaseModel):
+    """Schema for submitting clarification answers."""
+
+    answers: dict[str, Any] = Field(
+        description="Map of question ID to answer value (string or list of strings)",
+    )

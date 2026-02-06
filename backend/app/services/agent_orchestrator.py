@@ -43,9 +43,11 @@ from app.services.prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     DEVELOPER_SYSTEM_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
+    CLARITY_CHECK_PROMPT,
     build_architect_prompt,
     build_developer_prompt,
     build_reviewer_prompt,
+    build_clarity_check_prompt,
 )
 from app.providers import ProviderFactory, Message, Role
 
@@ -257,7 +259,7 @@ class HybridOrchestrator:
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
-        if execution.status not in ("pending", "running"):
+        if execution.status not in ("pending", "running", "awaiting_clarification"):
             raise ValueError(f"Execution {execution_id} cannot be cancelled")
 
         execution.status = "cancelled"
@@ -365,6 +367,15 @@ class HybridOrchestrator:
                 )
 
                 if phase == "architecture":
+                    # Run clarity check before architecture phase
+                    if execution.iteration == 1 and not execution.clarification_answers:
+                        should_pause = await self._run_clarity_check(
+                            db, execution, task, workspace_path, on_output
+                        )
+                        if should_pause:
+                            # Workflow paused for clarification — return early
+                            return execution
+
                     architecture_result = await self._run_architecture_phase(
                         db, execution, task, workspace_path, on_output
                     )
@@ -489,6 +500,199 @@ class HybridOrchestrator:
         return await orchestrator.execute_workflow(db, execution, on_output)
 
     # ========================================================================
+    # Clarification Methods
+    # ========================================================================
+
+    async def _run_clarity_check(
+        self,
+        db: AsyncSession,
+        execution: AgentExecution,
+        task: Task,
+        workspace_path: str,
+        on_output: Optional[Callable[[str, dict], Any]] = None,
+    ) -> bool:
+        """
+        Run clarity check on the task before architecture phase.
+
+        Returns True if the workflow should pause for clarification,
+        False if it can proceed.
+        """
+        # Get clarity threshold from board settings or default
+        board = await db.get(Board, execution.board_id)
+        clarity_threshold = 75
+        if board and board.settings:
+            clarity_threshold = board.settings.get("clarity_threshold", 75)
+
+        if on_output:
+            await on_output("progress", {
+                "phase": "architecture",
+                "message": f"Running clarity check (threshold: {clarity_threshold}%)...",
+            })
+
+        # Build the clarity check prompt
+        clarity_prompt = build_clarity_check_prompt(
+            task_title=task.title,
+            task_description=task.description or "",
+            clarity_threshold=clarity_threshold,
+            context=execution.context,
+        )
+
+        try:
+            # Use CLI to run clarity check
+            effective_cwd = await self._get_effective_working_directory(
+                db, task, execution, workspace_path
+            )
+            full_prompt = (
+                f"{CLARITY_CHECK_PROMPT}\n\n---\n\n{clarity_prompt}\n\n"
+                "IMPORTANT: Output ONLY the JSON object. No markdown, no code fences, no extra text."
+            )
+            raw_result = await self._run_claude_cli_simple(
+                prompt=full_prompt,
+                workspace_path=effective_cwd,
+                on_output=on_output,
+                timeout=120,
+            )
+
+            # Parse JSON from response (handle markdown fences)
+            json_str = raw_result.strip()
+            if json_str.startswith("```"):
+                # Remove markdown code fences
+                lines = json_str.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                json_str = "\n".join(lines)
+
+            clarity_result = json.loads(json_str)
+            clarity_score = clarity_result.get("clarity_score", 100)
+            can_proceed = clarity_result.get("can_proceed", True)
+            questions = clarity_result.get("questions", [])
+
+            logger.info(f"Clarity check: score={clarity_score}, can_proceed={can_proceed}, questions={len(questions)}")
+
+            if not can_proceed and questions:
+                # Save questions and pause execution
+                execution.clarification_questions = {
+                    "questions": questions,
+                    "summary": clarity_result.get("summary", ""),
+                    "confidence": clarity_score,
+                }
+                execution.status = "awaiting_clarification"
+                execution.current_phase = "architecture"
+
+                if task:
+                    task.agent_status = "awaiting_clarification"
+
+                await db.flush()
+
+                # Broadcast clarification_needed via WebSocket
+                asyncio.create_task(
+                    ws_manager.broadcast(
+                        str(execution.board_id),
+                        {
+                            "type": "clarification_needed",
+                            "payload": {
+                                "execution_id": str(execution.id),
+                                "task_id": str(execution.task_id),
+                                "board_id": str(execution.board_id),
+                                "questions": questions,
+                                "summary": clarity_result.get("summary", ""),
+                                "confidence": clarity_score,
+                            },
+                        },
+                    )
+                )
+
+                if on_output:
+                    await on_output("progress", {
+                        "phase": "architecture",
+                        "message": f"Clarity check: {clarity_score}% — awaiting clarification",
+                    })
+
+                return True  # Pause workflow
+
+            if on_output:
+                await on_output("progress", {
+                    "phase": "architecture",
+                    "message": f"Clarity check passed: {clarity_score}%",
+                })
+
+            return False  # Proceed with architecture
+
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Clarity check parse error, proceeding anyway: {e}")
+            if on_output:
+                await on_output("progress", {
+                    "phase": "architecture",
+                    "message": "Clarity check inconclusive, proceeding with planning",
+                })
+            return False
+        except Exception as e:
+            logger.warning(f"Clarity check failed, proceeding anyway: {e}")
+            if on_output:
+                await on_output("progress", {
+                    "phase": "architecture",
+                    "message": "Clarity check skipped (error), proceeding with planning",
+                })
+            return False
+
+    @staticmethod
+    async def resume_after_clarification(
+        db: AsyncSession,
+        execution_id: UUID,
+        answers: dict | None = None,
+        skipped: bool = False,
+    ) -> AgentExecution:
+        """
+        Resume a workflow that was paused for clarification.
+
+        Args:
+            db: Database session
+            execution_id: Execution to resume
+            answers: User's clarification answers (None if skipped)
+            skipped: True if user chose to skip clarification
+
+        Returns:
+            The execution (will continue in background)
+        """
+        execution = await HybridOrchestrator._get_execution(db, execution_id)
+        if not execution:
+            raise ValueError(f"Execution {execution_id} not found")
+
+        if execution.status != "awaiting_clarification":
+            raise ValueError(f"Execution {execution_id} is not awaiting clarification")
+
+        if skipped:
+            execution.clarification_answers = {"skipped": True}
+        else:
+            execution.clarification_answers = answers or {}
+
+        execution.status = "running"
+        await db.flush()
+
+        task = await db.get(Task, execution.task_id)
+        if task:
+            task.agent_status = "running"
+            await db.flush()
+
+        # Broadcast clarification_resolved via WebSocket
+        asyncio.create_task(
+            ws_manager.broadcast(
+                str(execution.board_id),
+                {
+                    "type": "clarification_resolved",
+                    "payload": {
+                        "execution_id": str(execution.id),
+                        "task_id": str(execution.task_id),
+                        "board_id": str(execution.board_id),
+                        "status": "running",
+                        "skipped": skipped,
+                    },
+                },
+            )
+        )
+
+        return execution
+
+    # ========================================================================
     # Phase Execution Methods
     # ========================================================================
 
@@ -537,6 +741,26 @@ class HybridOrchestrator:
                 task_description=task.description or "",
                 context=execution.context,
             )
+
+            # Enrich with clarification answers if available
+            if execution.clarification_answers and not execution.clarification_answers.get("skipped"):
+                clarification_section = [
+                    "",
+                    "## User Clarifications",
+                    "The user provided the following clarifications to improve planning:",
+                    "",
+                ]
+                questions = (execution.clarification_questions or {}).get("questions", [])
+                answers = execution.clarification_answers
+                for q in questions:
+                    q_id = q.get("id", "")
+                    answer = answers.get(q_id, "Not answered")
+                    if isinstance(answer, list):
+                        answer = ", ".join(answer)
+                    clarification_section.append(f"**Q: {q.get('question', '')}**")
+                    clarification_section.append(f"A: {answer}")
+                    clarification_section.append("")
+                arch_prompt += "\n".join(clarification_section)
 
             if on_output:
                 await on_output("progress", {
