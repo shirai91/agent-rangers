@@ -273,10 +273,16 @@ def build_developer_prompt(
         f"## Workspace",
         f"Your working directory is: `{workspace_path}`",
         "",
-        "## Architecture Plan",
-        architecture_plan,
-        "",
     ]
+
+    # Include architecture plan if available
+    has_architecture_plan = architecture_plan and architecture_plan.strip()
+    if has_architecture_plan:
+        prompt_parts.extend([
+            "## Architecture Plan",
+            architecture_plan,
+            "",
+        ])
 
     if iteration > 1 and feedback:
         prompt_parts.extend([
@@ -290,11 +296,19 @@ def build_developer_prompt(
             "",
         ])
 
-    prompt_parts.extend([
-        "## Your Task",
-        "Implement the solution according to the architecture plan above.",
-        "Create all necessary files, write tests, and ensure the implementation is complete.",
-    ])
+    prompt_parts.append("## Your Task")
+    if has_architecture_plan:
+        prompt_parts.extend([
+            "Implement the solution according to the architecture plan above.",
+            "Create all necessary files, write tests, and ensure the implementation is complete.",
+        ])
+    else:
+        prompt_parts.extend([
+            "No architecture plan is available for this task.",
+            "Analyze the task description and explore the codebase in your workspace to understand the project structure and existing patterns.",
+            "Determine what changes are needed and implement the solution.",
+            "Create all necessary files, write tests, and ensure the implementation is complete.",
+        ])
 
     return "\n".join(prompt_parts)
 

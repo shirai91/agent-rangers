@@ -795,6 +795,24 @@ class HybridOrchestrator:
         try:
             architecture_plan = architecture_result.get("content", "") if architecture_result else ""
 
+            # Fallback: If architecture_plan is empty, try to load from most recent plan-*.md file
+            if not architecture_plan or not architecture_plan.strip():
+                logger.warning("Architecture plan is empty, attempting to load from workspace plan-*.md files")
+                try:
+                    plan_files = sorted(
+                        Path(workspace_path).glob("plan-*.md"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True
+                    )
+                    if plan_files:
+                        latest_plan_file = plan_files[0]
+                        architecture_plan = latest_plan_file.read_text(encoding="utf-8")
+                        logger.info(f"Loaded architecture plan from fallback file: {latest_plan_file.name}")
+                    else:
+                        logger.warning("No plan-*.md files found in workspace for fallback")
+                except Exception as e:
+                    logger.error(f"Failed to load fallback plan file: {e}")
+
             # Determine effective working directory (info.json > board > default)
             effective_cwd = await self._get_effective_working_directory(
                 db, task, execution, workspace_path
