@@ -39,9 +39,9 @@ import {
 import { ArrowLeft, Plus, MoreVertical, Trash2, LayoutDashboard, Settings, Activity, X, FolderCog } from 'lucide-react';
 import type { Task, Column, Board as BoardType } from '@/types';
 
-const ENV_PORT = window.location.port;
-const ENV_LABEL = ENV_PORT === '5174' ? 'SANDBOX' : ENV_PORT === '5173' ? 'DEV' : null;
-const ENV_BADGE_CLASS = ENV_PORT === '5174'
+const APP_ENV = import.meta.env.VITE_APP_ENV || '';
+const ENV_LABEL = APP_ENV === 'dev' ? 'DEV' : APP_ENV === 'sandbox' ? 'SANDBOX' : null;
+const ENV_BADGE_CLASS = APP_ENV === 'sandbox'
   ? 'bg-orange-500 text-white'
   : 'bg-blue-500 text-white';
 
