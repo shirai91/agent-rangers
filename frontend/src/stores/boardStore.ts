@@ -443,7 +443,26 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     set({ executionLoading: true });
     try {
       const executions = await api.getTaskExecutions(taskId);
-      set({ executions, executionLoading: false });
+
+      // Restore pendingClarification state if an execution is awaiting clarification
+      const awaitingExec = executions.find(e => e.status === 'awaiting_clarification' && e.clarification_questions);
+      if (awaitingExec && awaitingExec.clarification_questions) {
+        set({
+          executions,
+          executionLoading: false,
+          pendingClarification: {
+            execution_id: awaitingExec.id,
+            task_id: awaitingExec.task_id,
+            board_id: awaitingExec.board_id,
+            questions: awaitingExec.clarification_questions.questions,
+            summary: awaitingExec.clarification_questions.summary,
+            confidence: awaitingExec.clarification_questions.confidence,
+          },
+        });
+      } else {
+        set({ executions, executionLoading: false });
+      }
+
       return executions;
     } catch (error) {
       set({ executionLoading: false });

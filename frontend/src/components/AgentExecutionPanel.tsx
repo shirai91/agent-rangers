@@ -365,8 +365,13 @@ export function AgentExecutionPanel({
                   <PlayCircle className="h-4 w-4 text-blue-600 animate-pulse" />
                   <span className="text-sm font-medium">Workflow Running</span>
                   <Badge variant="secondary" className="text-xs">
-                    {runningExecution.workflow_type}
+                    {getWorkflowLabel(runningExecution.workflow_type)}
                   </Badge>
+                  {runningExecution.current_phase && (
+                    <Badge variant="default" className="text-xs">
+                      {getPhaseLabel(runningExecution.current_phase)}
+                    </Badge>
+                  )}
                 </div>
                 <Button
                   variant="destructive"
