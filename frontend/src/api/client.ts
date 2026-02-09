@@ -369,7 +369,7 @@ export const api = {
   // Board Settings - Working Directory
   setWorkingDirectory: (boardId: string, directory: string) =>
     fetchJSON<Board>(`/api/boards/${encodeId(boardId)}/working-directory`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: JSON.stringify({ working_directory: directory }),
     }),
 
